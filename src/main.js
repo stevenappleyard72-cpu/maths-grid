@@ -40,6 +40,7 @@ const state = {
   unaryBonus: null,
   screen: 'home',
   difficulty: 'Easy',
+  audioContext: null,
 };
 
 const app = document.querySelector('#app');
@@ -280,6 +281,56 @@ function triggerBoardBurst(type = 'success') {
   }
 }
 
+function ensureAudioContext() {
+  if (!state.audioContext) {
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtor) {
+      state.audioContext = new AudioCtor();
+    }
+  }
+  return state.audioContext;
+}
+
+function playFeedbackCue(type = 'success') {
+  const context = ensureAudioContext();
+  if (!context) return;
+
+  const oscillator = context.createOscillator();
+  const gainNode = context.createGain();
+  const now = context.currentTime;
+
+  oscillator.type = type === 'error' ? 'sawtooth' : 'triangle';
+  oscillator.frequency.setValueAtTime(type === 'error' ? 180 : 420, now);
+  gainNode.gain.setValueAtTime(0.0001, now);
+  gainNode.gain.exponentialRampToValueAtTime(0.04, now + 0.01);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + (type === 'error' ? 0.17 : 0.24));
+
+  oscillator.connect(gainNode);
+  gainNode.connect(context.destination);
+  oscillator.start(now);
+  oscillator.stop(now + (type === 'error' ? 0.18 : 0.25));
+}
+
+function showToast(message, tone = 'success') {
+  const container = document.querySelector('#toastContainer') || (() => {
+    const node = document.createElement('div');
+    node.id = 'toastContainer';
+    node.className = 'toast-container';
+    document.body.appendChild(node);
+    return node;
+  })();
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${tone}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  window.setTimeout(() => {
+    toast.classList.add('is-leaving');
+    window.setTimeout(() => toast.remove(), 220);
+  }, 900);
+}
+
 function flashBoard(type, isPower = false) {
   const board = document.querySelector('#board');
   const statusCard = document.querySelector('.status-card');
@@ -296,6 +347,7 @@ function flashBoard(type, isPower = false) {
   }
 
   triggerBoardBurst(isPower ? 'power' : type);
+  playFeedbackCue(type === 'error' ? 'error' : 'success');
 
   window.setTimeout(() => {
     board.classList.remove(type, 'power');
@@ -446,6 +498,7 @@ function handleBoardSuccess(withUnary = false) {
     ? `Bonus! ${state.lastExpression} = ${state.target} • x${state.multiplier}`
     : `Perfect! ${state.lastExpression} = ${state.target} • x${state.multiplier}`;
   state.unaryBonus = null;
+  showToast(`+${scoreGain} points`, 'success');
   flashBoard('success', withUnary);
   renderUnaryButtons();
 
@@ -506,6 +559,7 @@ function evaluateCurrentExpression() {
   state.statusMessage = bonusCanHit
     ? `Current value ${state.lastValue} is close — the bonus can hit the target.`
     : `Current value ${state.lastValue} is not the target — multiplier reset and difficulty reset.`;
+  showToast(bonusCanHit ? 'Almost there!' : 'Target missed', 'error');
   flashBoard('error');
   updateUI();
   renderUnaryButtons();
