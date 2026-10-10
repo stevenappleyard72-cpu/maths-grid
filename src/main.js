@@ -170,6 +170,7 @@ function applyUnaryToCurrentValue(operation) {
   if (numericAdjusted === Number(state.target)) {
     state.lastExpression = `${state.lastValue}${getUnaryLabel(operation)}`;
     state.lastValue = numericAdjusted;
+    flashBoard('success', true);
     handleBoardSuccess(true);
     return;
   }
@@ -178,7 +179,7 @@ function applyUnaryToCurrentValue(operation) {
   state.streak = 0;
   state.unaryBonus = null;
   state.statusMessage = 'The unary bonus missed the target — multiplier reset.';
-  flashBoard('error');
+  flashBoard('error', false);
   renderUnaryButtons();
   updateUI();
 }
@@ -254,16 +255,53 @@ function renderLeaderboard() {
   });
 }
 
+function triggerBoardBurst(type = 'success') {
+  const boardWrap = document.querySelector('.board-wrap');
+  if (!boardWrap) return;
+
+  const colors = {
+    success: ['#4ade80', '#facc15', '#60a5fa'],
+    error: ['#ef4444', '#f97316', '#fdba74'],
+    power: ['#fde68a', '#fca5a5', '#a5b4fc'],
+  };
+
+  const palette = colors[type] || colors.success;
+  for (let i = 0; i < 10; i += 1) {
+    const spark = document.createElement('span');
+    spark.className = 'spark-pair';
+    spark.style.left = `${50 + (Math.random() * 20 - 10)}%`;
+    spark.style.top = `${50 + (Math.random() * 18 - 9)}%`;
+    spark.style.background = palette[i % palette.length];
+    spark.style.setProperty('--dx', `${(Math.random() * 120 - 60).toFixed(1)}px`);
+    spark.style.setProperty('--dy', `${(Math.random() * 120 - 60).toFixed(1)}px`);
+    boardWrap.appendChild(spark);
+
+    window.setTimeout(() => spark.remove(), 700);
+  }
+}
+
 function flashBoard(type, isPower = false) {
   const board = document.querySelector('#board');
+  const statusCard = document.querySelector('.status-card');
   if (!board) return;
   board.classList.remove('success', 'error', 'invalid', 'power');
   board.classList.add(type);
+  if (statusCard) {
+    statusCard.classList.remove('is-good', 'is-warning');
+    statusCard.classList.add(type === 'success' ? 'is-good' : 'is-warning');
+  }
+
   if (isPower) {
     board.classList.add('power');
   }
+
+  triggerBoardBurst(isPower ? 'power' : type);
+
   window.setTimeout(() => {
     board.classList.remove(type, 'power');
+    if (statusCard) {
+      statusCard.classList.remove('is-good', 'is-warning');
+    }
   }, 540);
 }
 
@@ -497,6 +535,7 @@ function updateUI() {
   const statusEl = document.querySelector('#Status');
   const expressionEl = document.querySelector('#Expression');
   const difficultyEl = document.querySelector('#Difficulty');
+  const expressionCard = document.querySelector('#Expression')?.closest('.info-card');
 
   if (!scoreEl || !bestEl || !roundEl || !targetEl || !timerEl || !comboEl || !statusEl || !expressionEl) return;
 
@@ -512,6 +551,13 @@ function updateUI() {
 
   if (difficultyEl) {
     difficultyEl.textContent = state.difficulty;
+  }
+
+  if (expressionCard) {
+    expressionCard.classList.remove('is-good', 'is-warning');
+    if (state.lastExpression && state.lastExpression !== '-') {
+      expressionCard.classList.add('is-good');
+    }
   }
 }
 
