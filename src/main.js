@@ -317,6 +317,9 @@ function ensureAudioContext() {
       state.audioContext = new AudioCtor();
     }
   }
+  if (state.audioContext && state.audioContext.state === 'suspended') {
+    state.audioContext.resume();
+  }
   return state.audioContext;
 }
 
@@ -669,6 +672,8 @@ function startTimer() {
 }
 
 function startGame() {
+  ensureAudioContext();
+
   const input = document.querySelector('#playerNameInput');
   const nameValue = (input?.value || '').trim();
 
@@ -734,7 +739,7 @@ function buildShell() {
 
         <div class="home-actions">
           <button id="homeStartBtn" class="primary-btn">Start game</button>
-          <button id="homeInstallBtn" class="install-btn" type="button" hidden>Install App</button>
+          <button id="homeInstallBtn" class="install-btn" type="button">Install App</button>
         </div>
 
         <div class="home-meta">
@@ -841,7 +846,14 @@ function buildShell() {
   const homeInstallButton = document.querySelector('#homeInstallBtn');
   if (homeInstallButton) {
     homeInstallButton.addEventListener('click', async () => {
-      if (!deferredPrompt) return;
+      if (!deferredPrompt) {
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+        if (!isStandalone) {
+          homeInstallButton.textContent = 'Open in browser to install';
+        }
+        return;
+      }
+
       deferredPrompt.prompt();
       await deferredPrompt.userChoice;
       deferredPrompt = null;
@@ -851,14 +863,20 @@ function buildShell() {
 
   const audioButton = document.querySelector('#audioToggleBtn');
   if (audioButton) {
-    audioButton.addEventListener('click', () => setSoundEnabled(!state.soundEnabled));
+    audioButton.addEventListener('click', () => {
+      ensureAudioContext();
+      setSoundEnabled(!state.soundEnabled);
+    });
     setSoundEnabled(state.soundEnabled);
   }
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     deferredPrompt = event;
-    if (homeInstallButton) homeInstallButton.hidden = false;
+    if (homeInstallButton) {
+      homeInstallButton.hidden = false;
+      homeInstallButton.textContent = 'Install App';
+    }
   });
 
   window.addEventListener('appinstalled', () => {
