@@ -193,12 +193,26 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
 
     const value = safeEvaluate(expression);
     if (value !== null && value >= minTarget && value <= maxTarget) {
-      return { expression, target: value };
+      const unaryOptions = getUnaryOptions();
+      const unaryBonus = randomFn() < 0.35 ? (() => {
+        const chosen = randomFrom(unaryOptions, randomFn);
+        return { operation: chosen, label: getUnaryLabel(chosen) };
+      })() : null;
+      return {
+        expression,
+        target: value,
+        unaryBonus,
+      };
     }
   }
 
   const fallbackExpression = '8+6*2';
-  return { expression: fallbackExpression, target: safeEvaluate(fallbackExpression) || 20 };
+  const fallbackTarget = safeEvaluate(fallbackExpression) || 20;
+  return {
+    expression: fallbackExpression,
+    target: fallbackTarget,
+    unaryBonus: { operation: 'square', label: getUnaryLabel('square') },
+  };
 }
 
 export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), round = 1) {
@@ -211,7 +225,7 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
     return { board: [], target: 20, pathLength: difficulty.pathLength };
   }
 
-  const { expression, target } = generateExpressionForSeed(
+  const { expression, target, unaryBonus } = generateExpressionForSeed(
     randomFn,
     difficulty.pathLength,
     difficulty.minTarget,
@@ -246,5 +260,12 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
     }
   }
 
-  return { board, target, expression, dailyKey: dateKey, pathLength: difficulty.pathLength };
+  return {
+    board,
+    target,
+    expression,
+    dailyKey: dateKey,
+    pathLength: difficulty.pathLength,
+    unaryBonus,
+  };
 }

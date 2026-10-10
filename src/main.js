@@ -89,8 +89,8 @@ function startNewBoard() {
   state.statusMessage = 'Swipe across the board to build an expression';
   state.dragging = false;
 
-  if (state.round > 0 && state.round % 3 === 0) {
-    spawnUnaryBonus();
+  if (boardState.unaryBonus) {
+    spawnUnaryBonus(boardState.unaryBonus);
   } else {
     state.unaryBonus = null;
     if (state.unaryTimerId) {
@@ -104,11 +104,12 @@ function startNewBoard() {
   renderUnaryButtons();
 }
 
-function spawnUnaryBonus() {
+function spawnUnaryBonus(forcedBonus = null) {
   if (state.gameEnded) return;
   const options = getUnaryOptions();
-  const chosen = options[Math.floor(Math.random() * options.length)];
-  state.unaryBonus = { operation: chosen, label: getUnaryLabel(chosen) };
+  const chosen = forcedBonus?.operation || options[Math.floor(Math.random() * options.length)];
+  const label = forcedBonus?.label || getUnaryLabel(chosen);
+  state.unaryBonus = { operation: chosen, label };
 
   if (state.unaryTimerId) {
     window.clearTimeout(state.unaryTimerId);
