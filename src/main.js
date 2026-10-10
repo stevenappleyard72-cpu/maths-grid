@@ -46,6 +46,7 @@ const app = document.querySelector('#app');
 const BEST_SCORE_KEY = 'mathsgrid-best-score';
 const PLAYER_NAME_KEY = 'mathsgrid-player-name';
 const MODE_KEY = 'mathsgrid-mode';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'dev';
 let deferredPrompt = null;
 
 function getDifficultyLabel() {
@@ -585,6 +586,7 @@ function buildShell() {
   app.innerHTML = `
     <div id="homeScreen" class="screen home-screen">
       <div class="home-card">
+        <div class="version-chip">build ${APP_VERSION}</div>
         <p class="eyebrow">Target number puzzle</p>
         <h1>MathsGrid</h1>
         <p class="home-copy">Swipe across adjacent tiles to build a valid arithmetic line. Hit the target before time runs out, and use the bonus unary operator when it lines up.</p>
@@ -609,6 +611,7 @@ function buildShell() {
       <div class="panel">
         <header class="topbar">
           <div>
+            <div class="version-chip">build ${APP_VERSION}</div>
             <p class="eyebrow">Target number puzzle</p>
             <h1>MathsGrid</h1>
           </div>
