@@ -41,12 +41,14 @@ const state = {
   screen: 'home',
   difficulty: 'Easy',
   audioContext: null,
+  soundEnabled: true,
 };
 
 const app = document.querySelector('#app');
 const BEST_SCORE_KEY = 'mathsgrid-best-score';
 const PLAYER_NAME_KEY = 'mathsgrid-player-name';
 const MODE_KEY = 'mathsgrid-mode';
+const SOUND_KEY = 'mathsgrid-sound-enabled';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'dev';
 let deferredPrompt = null;
 
@@ -198,6 +200,8 @@ function loadLocalBest() {
   }
   const storedMode = localStorage.getItem(MODE_KEY) || MODES.normal;
   state.mode = Object.values(MODES).includes(storedMode) ? storedMode : MODES.normal;
+  const storedSoundEnabled = localStorage.getItem(SOUND_KEY);
+  state.soundEnabled = storedSoundEnabled === null ? true : storedSoundEnabled !== 'false';
 }
 
 async function submitScore(score) {
@@ -281,6 +285,31 @@ function triggerBoardBurst(type = 'success') {
   }
 }
 
+function showComboPop(multiplier, label = 'combo') {
+  const boardWrap = document.querySelector('.board-wrap');
+  if (!boardWrap) return;
+
+  const popup = document.createElement('div');
+  popup.className = 'combo-pop';
+  popup.textContent = `${label === 'bonus' ? 'BONUS ' : ''}x${multiplier}`;
+  popup.style.left = '50%';
+  popup.style.top = '44%';
+  boardWrap.appendChild(popup);
+
+  window.setTimeout(() => popup.remove(), 820);
+}
+
+function setSoundEnabled(enabled) {
+  state.soundEnabled = enabled;
+  localStorage.setItem(SOUND_KEY, String(enabled));
+  const soundButton = document.querySelector('#audioToggleBtn');
+  if (soundButton) {
+    soundButton.textContent = enabled ? 'Sound: On' : 'Sound: Off';
+    soundButton.setAttribute('aria-pressed', String(enabled));
+    soundButton.classList.toggle('is-muted', !enabled);
+  }
+}
+
 function ensureAudioContext() {
   if (!state.audioContext) {
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
@@ -292,6 +321,7 @@ function ensureAudioContext() {
 }
 
 function playFeedbackCue(type = 'success') {
+  if (!state.soundEnabled) return;
   const context = ensureAudioContext();
   if (!context) return;
 
@@ -499,6 +529,7 @@ function handleBoardSuccess(withUnary = false) {
     : `Perfect! ${state.lastExpression} = ${state.target} • x${state.multiplier}`;
   state.unaryBonus = null;
   showToast(`+${scoreGain} points`, 'success');
+  showComboPop(state.multiplier, withUnary ? 'bonus' : 'combo');
   flashBoard('success', withUnary);
   renderUnaryButtons();
 
@@ -718,6 +749,7 @@ function buildShell() {
           </div>
           <div class="header-actions">
             <span id="Difficulty" class="difficulty-pill">Easy</span>
+            <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">Sound: On</button>
             <button id="installBtn" class="install-btn" hidden>Install App</button>
             <button id="restart" class="restart-btn">Restart</button>
           </div>
@@ -821,6 +853,12 @@ function buildShell() {
       deferredPrompt = null;
       installButton.hidden = true;
     });
+  }
+
+  const audioButton = document.querySelector('#audioToggleBtn');
+  if (audioButton) {
+    audioButton.addEventListener('click', () => setSoundEnabled(!state.soundEnabled));
+    setSoundEnabled(state.soundEnabled);
   }
 
   window.addEventListener('beforeinstallprompt', (event) => {
