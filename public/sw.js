@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mathsgrid-cache-v1';
+const CACHE_NAME = 'mathsgrid-cache-v20261010';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -21,12 +21,43 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  const url = new URL(event.request.url);
+  const isNavigation = event.request.mode === 'navigate';
+  const isSameOrigin = url.origin === self.location.origin;
+
+  if (isNavigation && isSameOrigin) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match('/index.html'))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) return cachedResponse;
+      if (cachedResponse) {
+        return fetch(event.request)
+          .then((networkResponse) => {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            return networkResponse;
+          })
+          .catch(() => cachedResponse);
+      }
 
       return fetch(event.request)
         .then((networkResponse) => {

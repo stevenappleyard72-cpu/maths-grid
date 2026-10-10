@@ -739,7 +739,21 @@ function init() {
   renderLeaderboard();
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch((error) => {
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
+      registration.addEventListener('updatefound', () => {
+        const installing = registration.installing;
+        if (!installing) return;
+        installing.addEventListener('statechange', () => {
+          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+            window.location.reload();
+          }
+        });
+      });
+
+      if (registration.waiting) {
+        window.location.reload();
+      }
+    }).catch((error) => {
       console.warn('Service worker registration failed:', error);
     });
   }
