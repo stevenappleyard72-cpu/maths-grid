@@ -46,6 +46,23 @@ function sortEntries(entries) {
 
 app.use(express.json({ limit: '1mb' }));
 
+const APP_SHELL_PATHS = new Set(['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/sw.js']);
+
+app.get(Array.from(APP_SHELL_PATHS), (req, res) => {
+  const requestedPath = req.path === '/' ? 'index.html' : req.path.replace(/^\/+/, '');
+  const resolvedPath = path.join(DIST_DIR, requestedPath || 'index.html');
+
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  if (fs.existsSync(resolvedPath)) {
+    return res.sendFile(resolvedPath);
+  }
+
+  return res.sendFile(path.join(DIST_DIR, 'index.html'));
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, status: 'MathsGrid service online' });
 });
