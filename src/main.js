@@ -45,6 +45,7 @@ const state = {
   solutionPath: [],
   hintIndex: 0,
   hintReveal: new Set(),
+  ambientLoopId: null,
 };
 
 const app = document.querySelector('#app');
@@ -314,6 +315,14 @@ function setSoundEnabled(enabled) {
     soundButton.setAttribute('aria-pressed', String(enabled));
     soundButton.classList.toggle('is-muted', !enabled);
   }
+
+  if (enabled) {
+    if (state.hasStarted && !state.gameEnded) {
+      startAmbientTune();
+    }
+  } else {
+    stopAmbientTune();
+  }
 }
 
 function ensureAudioContext() {
@@ -327,6 +336,52 @@ function ensureAudioContext() {
     state.audioContext.resume();
   }
   return state.audioContext;
+}
+
+function stopAmbientTune() {
+  if (state.ambientLoopId) {
+    window.clearInterval(state.ambientLoopId);
+    state.ambientLoopId = null;
+  }
+}
+
+function startAmbientTune() {
+  if (!state.soundEnabled || !state.hasStarted || state.gameEnded) return;
+  if (state.ambientLoopId) return;
+
+  const context = ensureAudioContext();
+  if (!context) return;
+
+  const melody = [261.63, 329.63, 392.0, 329.63, 293.66, 349.23, 392.0, 440.0];
+  let step = 0;
+
+  const playStep = () => {
+    if (!state.soundEnabled || !state.hasStarted || state.gameEnded) {
+      stopAmbientTune();
+      return;
+    }
+
+    const oscillator = context.createOscillator();
+    const gainNode = context.createGain();
+    const frequency = melody[step % melody.length];
+    const now = context.currentTime;
+
+    oscillator.type = 'triangle';
+    oscillator.frequency.setValueAtTime(frequency, now);
+    gainNode.gain.setValueAtTime(0.0001, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.012, now + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.25);
+
+    step += 1;
+  };
+
+  playStep();
+  state.ambientLoopId = window.setInterval(playStep, 260);
 }
 
 function playFeedbackCue(type = 'success') {
@@ -689,6 +744,7 @@ function startTimer() {
     state.timeLeft = Math.max(0, state.timeLeft - 1);
     if (state.timeLeft <= 0) {
       state.gameEnded = true;
+      stopAmbientTune();
       state.bestScore = Math.max(state.bestScore, state.score);
       saveLocalBest();
       submitScore(state.score);
@@ -729,6 +785,7 @@ function startGame() {
   state.lastValue = null;
   startNewBoard();
   startTimer();
+  startAmbientTune();
   hideGameOverModal();
 }
 
@@ -746,6 +803,7 @@ function resetGame() {
   startNewBoard();
   hideGameOverModal();
   startTimer();
+  startAmbientTune();
 }
 
 function buildShell() {
