@@ -78,14 +78,14 @@ export function isAlternatingExpressionTokens(tokens) {
 }
 
 export function getDifficultyProfile(round, mode = MODES.normal) {
-  const roundBoost = Math.max(0, round - 1) * 12;
-  const modeBoost = mode === MODES.streak ? 14 : mode === MODES.daily ? 8 : 0;
-  const pathLength = Math.min(7, 3 + Math.floor((round - 1) / 2) + (mode === MODES.streak ? 1 : 0));
-  const maxTarget = Math.min(100, 18 + roundBoost + modeBoost);
+  const roundBoost = Math.max(0, round - 1) * 6;
+  const modeBoost = mode === MODES.streak ? 8 : mode === MODES.daily ? 4 : 0;
+  const pathLength = Math.min(6, 3 + Math.floor((round - 1) / 3) + (mode === MODES.streak ? 1 : 0));
+  const maxTarget = Math.min(65, 10 + roundBoost + modeBoost + ((pathLength - 3) * 4));
 
   return {
     pathLength,
-    minTarget: 4,
+    minTarget: 3,
     maxTarget,
   };
 }
@@ -174,17 +174,19 @@ function buildPath(length, randomFn = Math.random) {
 
 function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, minTarget = 12, maxTarget = 225) {
   const ops = ['+', '-', '*', '/'];
-  const earlyFriendlyOps = ['+', '-', '*'];
+  const earlyFriendlyOps = ['+', '-'];
+  const mediumOps = ['+', '-', '*'];
 
   for (let attempt = 0; attempt < 500; attempt += 1) {
     let expression = '';
-    let seedNumber = 1 + Math.floor(randomFn() * 7);
+    let seedNumber = 1 + Math.floor(randomFn() * (requiredLength <= 4 ? 5 : 7));
     expression += String(seedNumber);
 
     for (let index = 1; index < requiredLength; index += 1) {
-      const allowedOps = requiredLength <= 5 ? earlyFriendlyOps : ops;
+      const allowedOps = requiredLength <= 4 ? earlyFriendlyOps : requiredLength <= 5 ? mediumOps : ops;
       const nextOperator = randomFrom(allowedOps, randomFn);
-      let nextNumber = 1 + Math.floor(randomFn() * (requiredLength <= 5 ? 8 : 12));
+      const maxOperand = requiredLength <= 4 ? 5 : requiredLength <= 5 ? 7 : 9;
+      let nextNumber = 1 + Math.floor(randomFn() * maxOperand);
       if (nextOperator === '/' && nextNumber === 0) {
         nextNumber = 1;
       }
@@ -196,7 +198,7 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
     const value = safeEvaluate(expression);
     if (value !== null && value >= minTarget && value <= maxTarget) {
       const unaryOptions = getUnaryOptions();
-      const unaryBonus = randomFn() < 0.28 ? (() => {
+      const unaryBonus = randomFn() < 0.18 ? (() => {
         const chosen = randomFrom(unaryOptions, randomFn);
         return { operation: chosen, label: getUnaryLabel(chosen) };
       })() : null;
@@ -208,12 +210,12 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
     }
   }
 
-  const fallbackExpression = '6+7+3';
-  const fallbackTarget = safeEvaluate(fallbackExpression) || 16;
+  const fallbackExpression = requiredLength <= 4 ? '4+3+2' : '6+5+4';
+  const fallbackTarget = safeEvaluate(fallbackExpression) || 9;
   return {
     expression: fallbackExpression,
     target: fallbackTarget,
-    unaryBonus: { operation: 'negate', label: getUnaryLabel('negate') },
+    unaryBonus: null,
   };
 }
 
