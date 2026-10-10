@@ -613,7 +613,6 @@ function endDrag() {
 function updateUI() {
   const scoreEl = document.querySelector('#Score');
   const bestEl = document.querySelector('#Best');
-  const roundEl = document.querySelector('#Round');
   const targetEl = document.querySelector('#Target');
   const timerEl = document.querySelector('#Timer');
   const comboEl = document.querySelector('#Combo');
@@ -622,12 +621,11 @@ function updateUI() {
   const difficultyEl = document.querySelector('#Difficulty');
   const expressionCard = document.querySelector('#Expression')?.closest('.info-card');
 
-  if (!scoreEl || !bestEl || !roundEl || !targetEl || !timerEl || !comboEl || !statusEl || !expressionEl) return;
+  if (!scoreEl || !bestEl || !targetEl || !timerEl || !comboEl || !statusEl || !expressionEl) return;
 
   state.difficulty = getDifficultyLabel();
   scoreEl.textContent = state.score;
   bestEl.textContent = state.bestScore;
-  roundEl.textContent = state.round;
   targetEl.textContent = state.target;
   timerEl.textContent = `${Math.ceil(state.timeLeft)}s`;
   comboEl.textContent = `x${state.multiplier}`;
@@ -771,10 +769,6 @@ function buildShell() {
             <strong id="Best">0</strong>
           </div>
           <div class="stat-card">
-            <span class="label">Round</span>
-            <strong id="Round">1</strong>
-          </div>
-          <div class="stat-card">
             <span class="label">Target</span>
             <strong id="Target">0</strong>
           </div>
@@ -794,22 +788,22 @@ function buildShell() {
           </div>
 
           <aside class="side-panel">
-            <div class="info-card">
-              <h2>Rules</h2>
-              <p>Swipe across adjacent tiles to build a valid expression.</p>
-              <p>Numbers and operators must alternate and cannot sit next to the same type.</p>
-            </div>
-            <div class="info-card">
-              <h2>Current expression</h2>
-              <p id="Expression">-</p>
-            </div>
             <div class="info-card bonus-card">
-              <h2>Unary bonus</h2>
+              <h2>⚡ Unary bonus</h2>
               <div id="bonusBar" class="bonus-bar"></div>
             </div>
             <div class="info-card status-card">
-              <h2>Status</h2>
+              <h2>✨ Status</h2>
               <p id="Status">Swipe across the board to build an expression</p>
+            </div>
+            <div class="info-card">
+              <h2>🧮 Current expression</h2>
+              <p id="Expression">-</p>
+            </div>
+            <div class="info-card">
+              <h2>🎯 Rules</h2>
+              <p>Swipe across adjacent tiles to build a valid expression.</p>
+              <p>Numbers and operators must alternate and cannot sit next to the same type.</p>
             </div>
             <div class="info-card">
               <h2>High scores</h2>
