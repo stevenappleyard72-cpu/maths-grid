@@ -792,10 +792,6 @@ function buildShell() {
               <h2>⚡ Unary bonus</h2>
               <div id="bonusBar" class="bonus-bar"></div>
             </div>
-            <div class="info-card status-card">
-              <h2>✨ Status</h2>
-              <p id="Status">Swipe across the board to build an expression</p>
-            </div>
             <div class="info-card">
               <h2>🧮 Current expression</h2>
               <p id="Expression">-</p>
@@ -808,6 +804,10 @@ function buildShell() {
             <div class="info-card">
               <h2>High scores</h2>
               <ul id="leaderboardList" class="leaderboard-list"></ul>
+            </div>
+            <div class="info-card status-card">
+              <h2>✨ Status</h2>
+              <p id="Status">Swipe across the board to build an expression</p>
             </div>
           </aside>
         </section>
