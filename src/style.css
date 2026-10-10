@@ -114,7 +114,7 @@ button {
   border: 3px solid rgba(255,255,255,0.78);
   border-radius: 32px;
   box-shadow: 0 26px 60px rgba(63, 115, 183, 0.18), inset 0 2px 0 rgba(255,255,255,0.8), 0 0 0 6px rgba(255,255,255,0.2), 0 20px 40px rgba(255, 111, 168, 0.12);
-  padding: 32px 28px;
+  padding: 28px 24px 26px;
   position: relative;
   overflow: hidden;
   transform: perspective(1000px) rotateX(1deg);
@@ -181,6 +181,18 @@ button {
 
 .home-actions {
   margin-top: 18px;
+}
+
+.home-mode-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 18px 0 10px;
+}
+
+.home-mode-picker .mode-btn {
+  width: 100%;
+  justify-self: stretch;
 }
 
 .home-meta {
@@ -913,10 +925,17 @@ h1 {
   width: 100%;
   padding: 0.9rem 1rem;
   border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(11, 17, 27, 0.9);
-  color: var(--text);
+  border: 1px solid rgba(17, 50, 87, 0.18);
+  background: rgba(255, 255, 255, 0.9);
+  color: #123456;
   font: inherit;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 0 0 1px rgba(255,255,255,0.1);
+}
+
+.field-wrap input:focus {
+  outline: none;
+  border-color: rgba(77, 168, 255, 0.7);
+  box-shadow: 0 0 0 3px rgba(77, 168, 255, 0.16), inset 0 1px 0 rgba(255,255,255,0.8);
 }
 
 .field-error {
