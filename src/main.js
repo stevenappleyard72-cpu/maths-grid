@@ -304,7 +304,7 @@ function setSoundEnabled(enabled) {
   localStorage.setItem(SOUND_KEY, String(enabled));
   const soundButton = document.querySelector('#audioToggleBtn');
   if (soundButton) {
-    soundButton.textContent = enabled ? 'Sound: On' : 'Sound: Off';
+    soundButton.innerHTML = enabled ? '🔊 Sound On' : '🔇 Sound Off';
     soundButton.setAttribute('aria-pressed', String(enabled));
     soundButton.classList.toggle('is-muted', !enabled);
   }
@@ -749,7 +749,7 @@ function buildShell() {
           </div>
           <div class="header-actions">
             <span id="Difficulty" class="difficulty-pill">Easy</span>
-            <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">Sound: On</button>
+            <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
             <button id="installBtn" class="install-btn" hidden>Install App</button>
             <button id="restart" class="restart-btn">Restart</button>
           </div>
