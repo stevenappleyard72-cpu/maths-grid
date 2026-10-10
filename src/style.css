@@ -293,11 +293,19 @@ button {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 0 0 1px rgba(255,255,255,0.18);
 }
 
-.mode-picker {
+.mode-picker,
+.home-mode-picker {
   display: flex;
   gap: 8px;
-  padding: 10px 20px 0;
   flex-wrap: wrap;
+}
+
+.mode-picker {
+  padding: 10px 20px 0;
+}
+
+.home-mode-picker {
+  margin: 18px 0 10px;
 }
 
 .mode-btn {
@@ -406,7 +414,7 @@ h1 {
 
 .game-area {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(210px, 0.7fr);
+  grid-template-columns: 1fr;
   gap: 16px;
   padding: 12px 20px 18px;
   min-height: 0;
@@ -418,6 +426,8 @@ h1 {
   min-height: 0;
   overflow: visible;
   transform: perspective(1200px) rotateX(2deg);
+  width: min(100%, 860px);
+  margin: 0 auto;
 }
 
 .board-wrap::before {
@@ -449,7 +459,8 @@ h1 {
   display: grid;
   grid-template-columns: repeat(5, minmax(54px, 1fr));
   gap: 12px;
-  height: 100%;
+  height: min(58vh, 560px);
+  width: 100%;
   background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(203,236,255,0.7), rgba(255,243,183,0.7));
   border: 2px solid rgba(96, 165, 250, 0.2);
   border-radius: 28px;
@@ -639,9 +650,23 @@ h1 {
 }
 
 .side-panel {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  width: min(100%, 860px);
+  margin: 0 auto;
+}
+
+.info-card {
+  min-height: 104px;
+}
+
+.bonus-card {
+  grid-column: 1 / -1;
+}
+
+#leaderboardList {
+  min-height: 100px;
 }
 
 .info-card {

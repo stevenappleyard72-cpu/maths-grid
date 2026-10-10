@@ -721,6 +721,12 @@ function buildShell() {
         <h1>MathsGrid</h1>
         <p class="home-copy">Swipe across adjacent tiles to build a valid arithmetic line. Hit the target before time runs out, and use the bonus unary operator when it lines up.</p>
 
+        <div class="home-mode-picker" aria-label="Game modes">
+          <button class="mode-btn is-active" data-mode="normal">Normal</button>
+          <button class="mode-btn" data-mode="streak">Streak</button>
+          <button class="mode-btn" data-mode="daily">Daily</button>
+        </div>
+
         <label class="field-wrap">
           <span>Player name</span>
           <input id="playerNameInput" maxlength="18" value="${state.playerName}" />
@@ -752,12 +758,6 @@ function buildShell() {
             <button id="restart" class="restart-btn">Restart</button>
           </div>
         </header>
-
-        <section class="mode-picker" aria-label="Game modes">
-          <button class="mode-btn is-active" data-mode="normal">Normal</button>
-          <button class="mode-btn" data-mode="streak">Streak</button>
-          <button class="mode-btn" data-mode="daily">Daily</button>
-        </section>
 
         <section class="stats">
           <div class="stat-card accent">
