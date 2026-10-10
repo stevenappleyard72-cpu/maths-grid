@@ -127,19 +127,38 @@ function getNeighbors(row, col) {
   ].filter((cell) => cell.row >= 0 && cell.row < GRID_SIZE && cell.col >= 0 && cell.col < GRID_SIZE);
 }
 
+function getCellType(row, col) {
+  return (row + col) % 2 === 0 ? 'number' : 'operator';
+}
+
 function buildPath(length, randomFn = Math.random) {
   const visited = new Set();
-  const start = {
-    row: Math.floor(randomFn() * GRID_SIZE),
-    col: Math.floor(randomFn() * GRID_SIZE),
-  };
+  const startCandidates = [];
 
+  for (let row = 0; row < GRID_SIZE; row += 1) {
+    for (let col = 0; col < GRID_SIZE; col += 1) {
+      const cellType = getCellType(row, col);
+      if (cellType === 'number') {
+        startCandidates.push({ row, col });
+      }
+    }
+  }
+
+  if (!startCandidates.length) {
+    return null;
+  }
+
+  const start = randomFrom(startCandidates, randomFn);
   const path = [start];
   visited.add(`${start.row},${start.col}`);
   let current = start;
 
   while (path.length < length) {
-    const neighbors = getNeighbors(current.row, current.col).filter((cell) => !visited.has(`${cell.row},${cell.col}`));
+    const neighbors = getNeighbors(current.row, current.col).filter((cell) => {
+      const key = `${cell.row},${cell.col}`;
+      return !visited.has(key) && getCellType(cell.row, cell.col) !== getCellType(current.row, current.col);
+    });
+
     if (!neighbors.length) {
       return null;
     }
@@ -203,21 +222,26 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
 
   for (let i = 0; i < path.length; i += 1) {
     const cell = path[i];
+    const tokenValue = tokenValues[i];
+    const expectedType = isNumberToken(tokenValue) ? 'number' : 'operator';
     board[cell.row][cell.col] = {
-      value: tokenValues[i],
-      type: isNumberToken(tokenValues[i]) ? 'number' : 'operator',
+      value: tokenValue,
+      type: expectedType,
     };
   }
 
-  const fillerValues = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-', '*', '/'];
+  const fillerNumbers = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  const fillerOperators = ['+', '-', '*', '/'];
 
   for (let row = 0; row < GRID_SIZE; row += 1) {
     for (let col = 0; col < GRID_SIZE; col += 1) {
       if (board[row][col]) continue;
-      const fillerValue = String(randomFrom(fillerValues, randomFn));
+      const expectedType = getCellType(row, col);
+      const fillerPool = expectedType === 'number' ? fillerNumbers : fillerOperators;
+      const fillerValue = String(randomFrom(fillerPool, randomFn));
       board[row][col] = {
         value: fillerValue,
-        type: isNumberToken(fillerValue) ? 'number' : 'operator',
+        type: expectedType,
       };
     }
   }
