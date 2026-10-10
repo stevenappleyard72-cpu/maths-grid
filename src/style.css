@@ -181,6 +181,9 @@ button {
 
 .home-actions {
   margin-top: 18px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .home-mode-picker {

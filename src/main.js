@@ -734,6 +734,7 @@ function buildShell() {
 
         <div class="home-actions">
           <button id="homeStartBtn" class="primary-btn">Start game</button>
+          <button id="homeInstallBtn" class="install-btn" type="button" hidden>Install App</button>
         </div>
 
         <div class="home-meta">
@@ -754,7 +755,6 @@ function buildShell() {
           <div class="header-actions">
             <span id="Difficulty" class="difficulty-pill">Easy</span>
             <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
-            <button id="installBtn" class="install-btn" hidden>Install App</button>
             <button id="restart" class="restart-btn">Restart</button>
           </div>
         </header>
@@ -838,14 +838,14 @@ function buildShell() {
     hideGameOverModal();
   });
 
-  const installButton = document.querySelector('#installBtn');
-  if (installButton) {
-    installButton.addEventListener('click', async () => {
+  const homeInstallButton = document.querySelector('#homeInstallBtn');
+  if (homeInstallButton) {
+    homeInstallButton.addEventListener('click', async () => {
       if (!deferredPrompt) return;
       deferredPrompt.prompt();
       await deferredPrompt.userChoice;
       deferredPrompt = null;
-      installButton.hidden = true;
+      homeInstallButton.hidden = true;
     });
   }
 
@@ -858,7 +858,11 @@ function buildShell() {
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     deferredPrompt = event;
-    if (installButton) installButton.hidden = false;
+    if (homeInstallButton) homeInstallButton.hidden = false;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    if (homeInstallButton) homeInstallButton.hidden = true;
   });
 
   window.addEventListener('pointerup', endDrag);
