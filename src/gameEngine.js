@@ -77,10 +77,28 @@ export function isAlternatingExpressionTokens(tokens) {
   return true;
 }
 
+export function isSimplePath(path) {
+  if (!Array.isArray(path) || !path.length) return false;
+
+  const seen = new Set();
+  for (const cell of path) {
+    if (!cell || typeof cell.row !== 'number' || typeof cell.col !== 'number') return false;
+    const key = `${cell.row},${cell.col}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+  }
+
+  return true;
+}
+
 export function getDifficultyProfile(round, mode = MODES.normal) {
   const roundBoost = Math.max(0, round - 1) * 6;
   const modeBoost = mode === MODES.streak ? 8 : mode === MODES.daily ? 4 : 0;
-  const pathLength = Math.min(6, 3 + Math.floor((round - 1) / 3) + (mode === MODES.streak ? 1 : 0));
+  let pathLength = 3 + Math.floor((round - 1) / 3) + (mode === MODES.streak ? 1 : 0);
+  pathLength = Math.min(9, pathLength);
+  if (pathLength % 2 === 0) {
+    pathLength -= 1;
+  }
   const maxTarget = Math.min(65, 10 + roundBoost + modeBoost + ((pathLength - 3) * 4));
 
   return {
@@ -176,16 +194,19 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
   const ops = ['+', '-', '*', '/'];
   const earlyFriendlyOps = ['+', '-'];
   const mediumOps = ['+', '-', '*'];
+  const safeLength = Math.max(3, Number(requiredLength) || 3);
+  const targetTokenCount = safeLength % 2 === 0 ? safeLength - 1 : safeLength;
 
   for (let attempt = 0; attempt < 500; attempt += 1) {
     let expression = '';
-    let seedNumber = 1 + Math.floor(randomFn() * (requiredLength <= 4 ? 5 : 7));
+    let seedNumber = 1 + Math.floor(randomFn() * (targetTokenCount <= 5 ? 5 : 7));
     expression += String(seedNumber);
 
-    for (let index = 1; index < requiredLength; index += 1) {
-      const allowedOps = requiredLength <= 4 ? earlyFriendlyOps : requiredLength <= 5 ? mediumOps : ops;
+    const pairCount = (targetTokenCount - 1) / 2;
+    for (let index = 0; index < pairCount; index += 1) {
+      const allowedOps = targetTokenCount <= 5 ? earlyFriendlyOps : targetTokenCount <= 7 ? mediumOps : ops;
       const nextOperator = randomFrom(allowedOps, randomFn);
-      const maxOperand = requiredLength <= 4 ? 5 : requiredLength <= 5 ? 7 : 9;
+      const maxOperand = targetTokenCount <= 5 ? 5 : targetTokenCount <= 7 ? 7 : 9;
       let nextNumber = 1 + Math.floor(randomFn() * maxOperand);
       if (nextOperator === '/' && nextNumber === 0) {
         nextNumber = 1;
@@ -210,7 +231,7 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
     }
   }
 
-  const fallbackExpression = requiredLength <= 4 ? '4+3+2' : '6+5+4';
+  const fallbackExpression = targetTokenCount <= 5 ? '3+2' : targetTokenCount <= 7 ? '5-2+1' : '6+5-2+1';
   const fallbackTarget = safeEvaluate(fallbackExpression) || 9;
   return {
     expression: fallbackExpression,
@@ -220,57 +241,102 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
 }
 
 export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), round = 1) {
-  const seededValue = hashString(`${mode}:${dateKey}:${round}`);
-  const randomFn = createSeededRandom(seededValue + Math.floor(Math.random() * 1000));
   const difficulty = getDifficultyProfile(round, mode);
-  const path = buildPath(difficulty.pathLength, randomFn);
 
-  if (!path) {
-    return { board: [], target: 20, pathLength: difficulty.pathLength };
-  }
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const seededValue = hashString(`${mode}:${dateKey}:${round}:${attempt}`);
+    const randomFn = createSeededRandom(seededValue + Math.floor(Math.random() * 1000));
+    const path = buildPath(difficulty.pathLength, randomFn);
 
-  const { expression, target, unaryBonus } = generateExpressionForSeed(
-    randomFn,
-    difficulty.pathLength,
-    difficulty.minTarget,
-    difficulty.maxTarget,
-  );
-  const board = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(null));
-  const tokenValues = expression.split('');
+    if (!path || path.length !== difficulty.pathLength || !isSimplePath(path)) {
+      continue;
+    }
 
-  for (let i = 0; i < path.length; i += 1) {
-    const cell = path[i];
-    const tokenValue = tokenValues[i];
-    const expectedType = isNumberToken(tokenValue) ? 'number' : 'operator';
-    board[cell.row][cell.col] = {
-      value: tokenValue,
-      type: expectedType,
+    const { expression, target, unaryBonus } = generateExpressionForSeed(
+      randomFn,
+      difficulty.pathLength,
+      difficulty.minTarget,
+      difficulty.maxTarget,
+    );
+
+    const expectedTokenCount = expression.split('').length;
+    if (expression.split('').length !== path.length) {
+      continue;
+    }
+
+    const board = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(null));
+    const tokenValues = expression.split('');
+
+    for (let i = 0; i < path.length; i += 1) {
+      const cell = path[i];
+      const tokenValue = tokenValues[i];
+      const expectedType = isNumberToken(tokenValue) ? 'number' : 'operator';
+      board[cell.row][cell.col] = {
+        value: tokenValue,
+        type: expectedType,
+      };
+    }
+
+    const pathExpression = path.map(({ row, col }) => board[row][col].value).join('');
+    if (!isSimplePath(path) || !isAlternatingExpressionTokens(pathExpression.split('')) || pathExpression !== expression) {
+      continue;
+    }
+
+    const evaluatedTarget = safeEvaluate(pathExpression);
+    if (evaluatedTarget === null || Number(evaluatedTarget) !== Number(target)) {
+      continue;
+    }
+
+    const fillerNumbers = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    const fillerOperators = ['+', '-', '*', '/'];
+
+    for (let row = 0; row < GRID_SIZE; row += 1) {
+      for (let col = 0; col < GRID_SIZE; col += 1) {
+        if (board[row][col]) continue;
+        const expectedType = getCellType(row, col);
+        const fillerPool = expectedType === 'number' ? fillerNumbers : fillerOperators;
+        const fillerValue = String(randomFrom(fillerPool, randomFn));
+        board[row][col] = {
+          value: fillerValue,
+          type: expectedType,
+        };
+      }
+    }
+
+    return {
+      board,
+      target,
+      expression,
+      dailyKey: dateKey,
+      pathLength: difficulty.pathLength,
+      unaryBonus,
+      path: path.map(({ row, col }) => ({ row, col })),
     };
   }
 
-  const fillerNumbers = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-  const fillerOperators = ['+', '-', '*', '/'];
+  const fallbackLength = difficulty.pathLength;
+  const fallbackExpression = fallbackLength <= 3 ? '3+2' : fallbackLength <= 5 ? '5-2+1' : '6+5-2+1';
+  const fallbackTarget = safeEvaluate(fallbackExpression) || 5;
+  const fallbackPath = buildPath(fallbackLength, createSeededRandom(hashString(`${mode}:${dateKey}:${round}:fallback`)));
+  const fallbackBoard = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(null));
 
-  for (let row = 0; row < GRID_SIZE; row += 1) {
-    for (let col = 0; col < GRID_SIZE; col += 1) {
-      if (board[row][col]) continue;
-      const expectedType = getCellType(row, col);
-      const fillerPool = expectedType === 'number' ? fillerNumbers : fillerOperators;
-      const fillerValue = String(randomFrom(fillerPool, randomFn));
-      board[row][col] = {
-        value: fillerValue,
-        type: expectedType,
+  if (fallbackPath && fallbackPath.length === fallbackExpression.length) {
+    for (let i = 0; i < fallbackPath.length; i += 1) {
+      const cell = fallbackPath[i];
+      fallbackBoard[cell.row][cell.col] = {
+        value: fallbackExpression[i],
+        type: isNumberToken(fallbackExpression[i]) ? 'number' : 'operator',
       };
     }
   }
 
   return {
-    board,
-    target,
-    expression,
+    board: fallbackBoard,
+    target: fallbackTarget,
+    expression: fallbackExpression,
     dailyKey: dateKey,
-    pathLength: difficulty.pathLength,
-    unaryBonus,
-    path: path.map(({ row, col }) => ({ row, col })),
+    pathLength: fallbackLength,
+    unaryBonus: null,
+    path: (fallbackPath || []).map(({ row, col }) => ({ row, col })),
   };
 }

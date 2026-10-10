@@ -621,6 +621,18 @@ function evaluateCurrentExpression() {
   const expression = state.path.map(({ row, col }) => state.board[row][col].value).join('');
   state.lastExpression = expression;
 
+  const seenCells = new Set();
+  for (const tile of state.path) {
+    const key = `${tile.row},${tile.col}`;
+    if (seenCells.has(key)) {
+      state.statusMessage = 'You cannot retrace a route through the same tile again';
+      flashBoard('invalid');
+      updateUI();
+      return false;
+    }
+    seenCells.add(key);
+  }
+
   if (!expression || expression.length < 3) {
     state.statusMessage = 'Swipe a longer route';
     flashBoard('invalid');
@@ -848,7 +860,7 @@ function buildShell() {
           </div>
           <div class="header-actions">
             <span id="Difficulty" class="difficulty-pill">Easy</span>
-            <button id="hintBtn" class="secondary-btn" type="button">Hint</button>
+            <button id="hintBtn" class="secondary-btn" type="button" aria-label="Show a hint">Hint</button>
             <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
             <button id="restart" class="restart-btn">Restart</button>
           </div>
