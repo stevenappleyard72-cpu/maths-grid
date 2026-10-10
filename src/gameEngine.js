@@ -271,5 +271,6 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
     dailyKey: dateKey,
     pathLength: difficulty.pathLength,
     unaryBonus,
+    path: path.map(({ row, col }) => ({ row, col })),
   };
 }

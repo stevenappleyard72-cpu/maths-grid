@@ -42,6 +42,9 @@ const state = {
   difficulty: 'Easy',
   audioContext: null,
   soundEnabled: true,
+  solutionPath: [],
+  hintIndex: 0,
+  hintReveal: new Set(),
 };
 
 const app = document.querySelector('#app');
@@ -85,6 +88,9 @@ function startNewBoard() {
   const boardState = createBoardState(state.mode, state.dailyKey, Math.max(1, state.round));
   state.board = boardState.board;
   state.target = boardState.target;
+  state.solutionPath = boardState.path || [];
+  state.hintIndex = 0;
+  state.hintReveal = new Set();
   state.path = [];
   state.set.clear();
   state.lastExpression = '-';
@@ -131,7 +137,7 @@ function renderUnaryButtons() {
   if (!bonusBar) return;
 
   if (!state.unaryBonus) {
-    bonusBar.innerHTML = '<span class="bonus-empty">No unary bonus active</span>';
+    bonusBar.innerHTML = '<span class="bonus-empty">No unary bonus active right now</span>';
     return;
   }
 
@@ -141,7 +147,7 @@ function renderUnaryButtons() {
   button.type = 'button';
   button.className = `unary-btn${viable ? ' pulse' : ''}`;
   button.dataset.operation = state.unaryBonus.operation;
-  button.textContent = state.unaryBonus.label;
+  button.textContent = `${state.unaryBonus.label} bonus`;
   button.title = `Use ${state.unaryBonus.label} on the current value`;
   button.addEventListener('click', () => applyUnaryToCurrentValue(state.unaryBonus.operation));
   bonusBar.innerHTML = '';
@@ -439,6 +445,10 @@ function renderBoard() {
         tile.classList.add('selected');
       }
 
+      if (state.hintReveal.has(key)) {
+        tile.classList.add('hint');
+      }
+
       tile.addEventListener('pointerdown', (event) => {
         event.preventDefault();
         if (state.gameEnded) return;
@@ -613,6 +623,27 @@ function endDrag() {
   renderBoard();
 }
 
+function revealHint() {
+  if (!state.solutionPath || !state.solutionPath.length) {
+    showToast('No hint available for this round', 'error');
+    return;
+  }
+
+  if (state.hintIndex >= state.solutionPath.length) {
+    state.statusMessage = 'The full route is already highlighted';
+    updateUI();
+    showToast('Full route is now visible', 'success');
+    return;
+  }
+
+  const nextCell = state.solutionPath[state.hintIndex];
+  state.hintReveal.add(`${nextCell.row},${nextCell.col}`);
+  state.hintIndex += 1;
+  state.statusMessage = `Hint: try the highlighted square${state.hintIndex > 1 ? ' next' : ''}`;
+  updateUI();
+  renderBoard();
+}
+
 function updateUI() {
   const scoreEl = document.querySelector('#Score');
   const bestEl = document.querySelector('#Best');
@@ -759,6 +790,7 @@ function buildShell() {
           </div>
           <div class="header-actions">
             <span id="Difficulty" class="difficulty-pill">Easy</span>
+            <button id="hintBtn" class="secondary-btn" type="button">Hint</button>
             <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
             <button id="restart" class="restart-btn">Restart</button>
           </div>
@@ -846,11 +878,18 @@ function buildShell() {
   const homeInstallButton = document.querySelector('#homeInstallBtn');
   if (homeInstallButton) {
     homeInstallButton.addEventListener('click', async () => {
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+      if (isStandalone) {
+        homeInstallButton.hidden = true;
+        return;
+      }
+
       if (!deferredPrompt) {
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-        if (!isStandalone) {
-          homeInstallButton.textContent = 'Open in browser to install';
-        }
+        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+        showToast(
+          isIOS ? 'On iPhone: tap Share → Add to Home Screen' : 'Use the browser menu to install this app',
+          'info',
+        );
         return;
       }
 
@@ -859,6 +898,11 @@ function buildShell() {
       deferredPrompt = null;
       homeInstallButton.hidden = true;
     });
+  }
+
+  const hintBtn = document.querySelector('#hintBtn');
+  if (hintBtn) {
+    hintBtn.addEventListener('click', revealHint);
   }
 
   const audioButton = document.querySelector('#audioToggleBtn');

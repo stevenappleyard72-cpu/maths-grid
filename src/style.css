@@ -587,6 +587,13 @@ h1 {
   animation: tile-bounce 0.24s ease;
 }
 
+.tile.hint {
+  background: linear-gradient(180deg, #dbeafe, #93c5fd 45%, #60a5fa 100%);
+  border-color: rgba(59, 130, 246, 0.7);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18), 0 14px 26px rgba(96, 165, 250, 0.22);
+  transform: scale(1.02);
+}
+
 .tile.selected::after {
   content: "";
   position: absolute;
@@ -835,6 +842,11 @@ h1 {
 .toast.success {
   background: linear-gradient(135deg, rgba(34, 197, 94, 0.95), rgba(74, 222, 128, 0.95));
   color: #f0fdf4;
+}
+
+.toast.info {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(96, 165, 250, 0.95));
+  color: #eff6ff;
 }
 
 .toast.error {
