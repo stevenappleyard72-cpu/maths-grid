@@ -9,7 +9,6 @@ import {
   getUnaryOptions,
   applyUnaryBonus,
   isNumberToken,
-  isOperatorToken,
   safeEvaluate,
   isAlternatingExpressionTokens,
   createBoardState,
@@ -39,7 +38,8 @@ const state = {
   gameEnded: false,
   dailyKey: getDailyKey(),
   unaryBonus: null,
-  unaryUsedThisRound: false,
+  screen: 'home',
+  difficulty: 'Easy',
 };
 
 const app = document.querySelector('#app');
@@ -47,6 +47,13 @@ const BEST_SCORE_KEY = 'mathsgrid-best-score';
 const PLAYER_NAME_KEY = 'mathsgrid-player-name';
 const MODE_KEY = 'mathsgrid-mode';
 let deferredPrompt = null;
+
+function getDifficultyLabel() {
+  if (state.round <= 2) return 'Easy';
+  if (state.round <= 5) return 'Medium';
+  if (state.round <= 8) return 'Hard';
+  return 'Chaos';
+}
 
 function setMode(mode) {
   state.mode = mode;
@@ -61,17 +68,36 @@ function setMode(mode) {
   }
 }
 
+function setScreen(screen) {
+  state.screen = screen;
+  const homeScreen = document.querySelector('#homeScreen');
+  const gameScreen = document.querySelector('#gameScreen');
+  if (homeScreen) homeScreen.classList.toggle('hidden', screen !== 'home');
+  if (gameScreen) gameScreen.classList.toggle('hidden', screen !== 'game');
+}
+
 function startNewBoard() {
-  const boardState = createBoardState(state.mode, state.dailyKey, state.round);
+  state.difficulty = getDifficultyLabel();
+  const boardState = createBoardState(state.mode, state.dailyKey, Math.max(1, state.round));
   state.board = boardState.board;
   state.target = boardState.target;
   state.path = [];
   state.set.clear();
   state.lastExpression = '-';
   state.lastValue = null;
-  state.statusMessage = 'Select a valid route';
-  state.unaryUsedThisRound = false;
-  spawnUnaryBonus();
+  state.statusMessage = 'Swipe across the board to build an expression';
+  state.dragging = false;
+
+  if (state.round > 0 && state.round % 3 === 0) {
+    spawnUnaryBonus();
+  } else {
+    state.unaryBonus = null;
+    if (state.unaryTimerId) {
+      window.clearTimeout(state.unaryTimerId);
+      state.unaryTimerId = null;
+    }
+  }
+
   renderBoard();
   updateUI();
   renderUnaryButtons();
@@ -79,7 +105,6 @@ function startNewBoard() {
 
 function spawnUnaryBonus() {
   if (state.gameEnded) return;
-
   const options = getUnaryOptions();
   const chosen = options[Math.floor(Math.random() * options.length)];
   state.unaryBonus = { operation: chosen, label: getUnaryLabel(chosen) };
@@ -91,7 +116,7 @@ function spawnUnaryBonus() {
   state.unaryTimerId = window.setTimeout(() => {
     state.unaryBonus = null;
     renderUnaryButtons();
-  }, 7000);
+  }, 8000);
 
   renderUnaryButtons();
 }
@@ -105,9 +130,11 @@ function renderUnaryButtons() {
     return;
   }
 
+  const viable = state.lastValue !== null && Number.isFinite(applyUnaryBonus(state.lastValue, state.unaryBonus.operation))
+    && Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)) === Number(state.target);
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'unary-btn';
+  button.className = `unary-btn${viable ? ' pulse' : ''}`;
   button.dataset.operation = state.unaryBonus.operation;
   button.textContent = state.unaryBonus.label;
   button.title = `Use ${state.unaryBonus.label} on the current value`;
@@ -117,37 +144,40 @@ function renderUnaryButtons() {
 }
 
 function applyUnaryToCurrentValue(operation) {
-  if (state.gameEnded) return;
+  if (state.gameEnded || !state.unaryBonus) return;
   if (state.lastValue === null || state.lastValue === undefined) {
-    state.statusMessage = 'Create a valid number first, then use the bonus.';
+    state.statusMessage = 'Build a valid expression before using the unary bonus.';
     updateUI();
     return;
   }
 
   const adjusted = applyUnaryBonus(state.lastValue, operation);
-  if (adjusted === null) {
-    state.statusMessage = 'That unary action is not valid for this value.';
+  const numericAdjusted = Number(adjusted);
+
+  if (adjusted === null || !Number.isFinite(numericAdjusted)) {
     state.multiplier = 1;
     state.streak = 0;
-    flashBoard('invalid');
+    state.unaryBonus = null;
+    state.statusMessage = 'Unary bonus failed — multiplier reset.';
+    flashBoard('error');
+    renderUnaryButtons();
     updateUI();
     return;
   }
 
-  state.unaryUsedThisRound = true;
-  state.lastExpression = `${state.lastValue}${getUnaryLabel(operation)}`;
-  const bonusValue = Number(adjusted);
-  state.lastValue = bonusValue;
-
-  if (bonusValue === state.target) {
+  if (numericAdjusted === Number(state.target)) {
+    state.lastExpression = `${state.lastValue}${getUnaryLabel(operation)}`;
+    state.lastValue = numericAdjusted;
     handleBoardSuccess(true);
     return;
   }
 
   state.multiplier = 1;
   state.streak = 0;
-  state.statusMessage = `${state.lastValue} is not the target — the multiplier reset.`;
+  state.unaryBonus = null;
+  state.statusMessage = 'The unary bonus missed the target — multiplier reset.';
   flashBoard('error');
+  renderUnaryButtons();
   updateUI();
 }
 
@@ -222,12 +252,17 @@ function renderLeaderboard() {
   });
 }
 
-function flashBoard(type) {
+function flashBoard(type, isPower = false) {
   const board = document.querySelector('#board');
   if (!board) return;
-  board.classList.remove('success', 'error', 'invalid');
+  board.classList.remove('success', 'error', 'invalid', 'power');
   board.classList.add(type);
-  window.setTimeout(() => board.classList.remove(type), 420);
+  if (isPower) {
+    board.classList.add('power');
+  }
+  window.setTimeout(() => {
+    board.classList.remove(type, 'power');
+  }, 540);
 }
 
 function showGameOverModal() {
@@ -249,6 +284,17 @@ function hideGameOverModal() {
 function renderBoard() {
   const boardEl = document.querySelector('#board');
   if (!boardEl) return;
+
+  boardEl.onpointermove = (event) => {
+    if (!state.dragging || state.gameEnded) return;
+    const tile = event.target.closest('.tile');
+    if (!tile) return;
+    const row = Number(tile.dataset.row);
+    const col = Number(tile.dataset.col);
+    if (!Number.isFinite(row) || !Number.isFinite(col)) return;
+    extendDrag(row, col);
+  };
+
   boardEl.innerHTML = '';
 
   for (let row = 0; row < GRID_SIZE; row += 1) {
@@ -274,12 +320,6 @@ function renderBoard() {
         beginDrag(row, col);
       });
 
-      tile.addEventListener('pointerenter', () => {
-        if (state.dragging && !state.gameEnded) {
-          extendDrag(row, col);
-        }
-      });
-
       boardEl.appendChild(tile);
     }
   }
@@ -289,16 +329,36 @@ function beginDrag(row, col) {
   state.dragging = true;
   state.path = [{ row, col }];
   state.set = new Set([`${row},${col}`]);
-  state.statusMessage = 'Dragging...';
+  state.lastExpression = state.board[row][col].value;
+  state.statusMessage = 'Swipe across the grid';
   updateUI();
   renderBoard();
 }
 
 function extendDrag(row, col) {
+  if (!state.dragging || state.gameEnded) return;
+
   const last = state.path[state.path.length - 1];
   const key = `${row},${col}`;
 
-  if (state.set.has(key)) return;
+  if (row === last.row && col === last.col) {
+    state.lastExpression = state.path.map(({ row: r, col: c }) => state.board[r][c].value).join('');
+    updateUI();
+    return;
+  }
+
+  const previousIndex = state.path.findIndex((cell) => cell.row === row && cell.col === col);
+  if (previousIndex !== -1) {
+    if (previousIndex === state.path.length - 2) {
+      state.path.pop();
+      state.set.delete(key);
+      state.lastExpression = state.path.map(({ row: r, col: c }) => state.board[r][c].value).join('');
+      state.statusMessage = 'Backtracking...';
+      updateUI();
+      renderBoard();
+    }
+    return;
+  }
 
   const rowDelta = Math.abs(row - last.row);
   const colDelta = Math.abs(col - last.col);
@@ -310,71 +370,118 @@ function extendDrag(row, col) {
   const prevIsNumber = isNumberToken(previousToken);
 
   if (nextIsNumber === prevIsNumber) {
-    state.statusMessage = 'Use alternating numbers and operators';
+    state.statusMessage = 'Numbers and operators must alternate';
     updateUI();
     return;
   }
 
   state.path.push({ row, col });
   state.set.add(key);
-  state.statusMessage = 'Selection in progress';
+  state.lastExpression = state.path.map(({ row: r, col: c }) => state.board[r][c].value).join('');
+  state.statusMessage = 'Expression building...';
   updateUI();
   renderBoard();
 }
 
 function handleBoardSuccess(withUnary = false) {
-  state.streak += 1;
-  const baseScore = state.mode === MODES.streak ? 18 : 10;
+  const expressionTokens = state.lastExpression.split('');
+  const numberCount = expressionTokens.filter((token) => /\d/.test(token)).length;
+  const operatorCount = expressionTokens.filter((token) => /[+\-*/]/.test(token)).length;
+  const chainBonus = Math.max(0, expressionTokens.length - 3) * 4;
+  const densityBonus = (numberCount + operatorCount) * 3;
+  const unaryBoost = withUnary ? 25 : 0;
+  const baseScore = state.mode === MODES.streak ? 18 : 12;
+  const extraMultiplier = Math.max(1, Math.floor((numberCount + operatorCount - 2) / 2));
   const multiplierBoost = withUnary ? 2 : 1;
-  const nextMultiplier = Math.max(1, state.multiplier + 1) * multiplierBoost;
+  const nextMultiplier = Math.max(1, state.multiplier + 1 + extraMultiplier) * multiplierBoost;
   state.multiplier = nextMultiplier;
-  state.score += baseScore * state.multiplier;
+  const scoreGain = Math.max(10, baseScore + chainBonus + densityBonus + unaryBoost) * state.multiplier;
+  state.streak += 1;
+  state.score += scoreGain;
   state.bestScore = Math.max(state.bestScore, state.score);
   saveLocalBest();
   state.round += 1;
+  state.timeLeft = Math.min(60, state.timeLeft + 10);
   state.statusMessage = withUnary
-    ? `Bonus! ${state.lastExpression} = ${state.target} • x${state.multiplier} combo`
-    : `Perfect! ${state.lastExpression} = ${state.target} • x${state.multiplier} combo`;
-  flashBoard('success');
+    ? `Bonus! ${state.lastExpression} = ${state.target} • x${state.multiplier}`
+    : `Perfect! ${state.lastExpression} = ${state.target} • x${state.multiplier}`;
+  state.unaryBonus = null;
+  flashBoard('success', withUnary);
+  renderUnaryButtons();
+
   window.setTimeout(() => {
-    state.timeLeft = Math.min(ROUND_TIME, state.timeLeft + 4);
     startNewBoard();
-  }, 450);
+  }, 420);
+}
+
+function resetDifficultyAndBoard() {
+  state.round = 1;
+  state.streak = 0;
+  state.multiplier = 1;
+  state.statusMessage = 'Difficulty reset — back to easy mode.';
+  flashBoard('error');
+  window.setTimeout(() => {
+    startNewBoard();
+  }, 260);
+}
+
+function evaluateCurrentExpression() {
+  const expression = state.path.map(({ row, col }) => state.board[row][col].value).join('');
+  state.lastExpression = expression;
+
+  if (!expression || expression.length < 3) {
+    state.statusMessage = 'Swipe a longer route';
+    flashBoard('invalid');
+    updateUI();
+    return false;
+  }
+
+  const tokens = expression.split('');
+  if (!isAlternatingExpressionTokens(tokens)) {
+    state.statusMessage = 'Numbers and operators must alternate';
+    flashBoard('invalid');
+    updateUI();
+    return false;
+  }
+
+  const value = safeEvaluate(expression);
+  if (value === null) {
+    state.statusMessage = 'That route evaluates to no value.';
+    flashBoard('invalid');
+    updateUI();
+    return false;
+  }
+
+  state.lastValue = Number(value);
+  if (state.lastValue === Number(state.target)) {
+    handleBoardSuccess(false);
+    return true;
+  }
+
+  state.round = 1;
+  state.streak = 0;
+  state.multiplier = 1;
+  const bonusCanHit = state.unaryBonus && Number.isFinite(applyUnaryBonus(state.lastValue, state.unaryBonus.operation))
+    && Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)) === Number(state.target);
+  state.statusMessage = bonusCanHit
+    ? `Current value ${state.lastValue} is close — the bonus can hit the target.`
+    : `Current value ${state.lastValue} is not the target — multiplier reset and difficulty reset.`;
+  flashBoard('error');
+  updateUI();
+  renderUnaryButtons();
+  window.setTimeout(() => {
+    startNewBoard();
+  }, 320);
+  return false;
 }
 
 function endDrag() {
   if (!state.dragging || state.gameEnded) return;
 
-  const expression = state.path.map(({ row, col }) => state.board[row][col].value).join('');
-  const tokens = expression.split('');
-  state.lastExpression = expression;
-
-  if (!isAlternatingExpressionTokens(tokens)) {
-    state.statusMessage = 'That route is not valid — numbers and operators must alternate';
-    flashBoard('invalid');
-  } else {
-    const value = safeEvaluate(expression);
-
-    if (value === null || expression.length < 3) {
-      state.statusMessage = 'That route is not valid';
-      flashBoard('invalid');
-    } else {
-      state.lastValue = Number(value);
-      if (state.lastValue === state.target) {
-        handleBoardSuccess(false);
-      } else {
-        state.streak = 0;
-        state.multiplier = 1;
-        state.statusMessage = `Current value ${state.lastValue} is close, but target is ${state.target}. Use a bonus if it appears.`;
-        flashBoard('error');
-      }
-    }
-  }
-
+  evaluateCurrentExpression();
   state.dragging = false;
   state.path = [];
   state.set.clear();
-  updateUI();
   renderBoard();
 }
 
@@ -387,9 +494,11 @@ function updateUI() {
   const comboEl = document.querySelector('#Combo');
   const statusEl = document.querySelector('#Status');
   const expressionEl = document.querySelector('#Expression');
+  const difficultyEl = document.querySelector('#Difficulty');
 
   if (!scoreEl || !bestEl || !roundEl || !targetEl || !timerEl || !comboEl || !statusEl || !expressionEl) return;
 
+  state.difficulty = getDifficultyLabel();
   scoreEl.textContent = state.score;
   bestEl.textContent = state.bestScore;
   roundEl.textContent = state.round;
@@ -398,6 +507,10 @@ function updateUI() {
   comboEl.textContent = `x${state.multiplier}`;
   statusEl.textContent = state.statusMessage;
   expressionEl.textContent = state.lastExpression;
+
+  if (difficultyEl) {
+    difficultyEl.textContent = state.difficulty;
+  }
 }
 
 function startTimer() {
@@ -429,13 +542,14 @@ function startGame() {
   const nameValue = (input?.value || '').trim();
 
   if (!nameValue) {
-    document.querySelector('#nameError').textContent = 'Please enter a player name.';
+    const error = document.querySelector('#nameError');
+    if (error) error.textContent = 'Please enter a player name.';
     return;
   }
 
   state.playerName = nameValue;
   localStorage.setItem(PLAYER_NAME_KEY, nameValue);
-  document.querySelector('#nameModal').classList.add('hidden');
+  setScreen('game');
   state.score = 0;
   state.streak = 0;
   state.round = 1;
@@ -444,8 +558,10 @@ function startGame() {
   state.hasStarted = true;
   state.multiplier = 1;
   state.dailyKey = getDailyKey();
+  state.lastExpression = '-';
+  state.lastValue = null;
   startNewBoard();
-  if (!state.timerId) startTimer();
+  startTimer();
   hideGameOverModal();
 }
 
@@ -457,15 +573,39 @@ function resetGame() {
   state.gameEnded = false;
   state.multiplier = 1;
   state.dailyKey = getDailyKey();
-  state.statusMessage = 'Select a valid route';
+  state.statusMessage = 'Swipe across the board to build an expression';
+  state.lastExpression = '-';
+  state.lastValue = null;
   startNewBoard();
   hideGameOverModal();
-  if (!state.timerId) startTimer();
+  startTimer();
 }
 
 function buildShell() {
   app.innerHTML = `
-    <div class="shell">
+    <div id="homeScreen" class="screen home-screen">
+      <div class="home-card">
+        <p class="eyebrow">Target number puzzle</p>
+        <h1>MathsGrid</h1>
+        <p class="home-copy">Swipe across adjacent tiles to build a valid arithmetic line. Hit the target before time runs out, and use the bonus unary operator when it lines up.</p>
+
+        <label class="field-wrap">
+          <span>Player name</span>
+          <input id="playerNameInput" maxlength="18" value="${state.playerName}" />
+        </label>
+
+        <div class="home-actions">
+          <button id="homeStartBtn" class="primary-btn">Start game</button>
+        </div>
+
+        <div class="home-meta">
+          <span>Best score</span>
+          <strong>${state.bestScore}</strong>
+        </div>
+      </div>
+    </div>
+
+    <div id="gameScreen" class="screen game-screen hidden">
       <div class="panel">
         <header class="topbar">
           <div>
@@ -473,6 +613,7 @@ function buildShell() {
             <h1>MathsGrid</h1>
           </div>
           <div class="header-actions">
+            <span id="Difficulty" class="difficulty-pill">Easy</span>
             <button id="installBtn" class="install-btn" hidden>Install App</button>
             <button id="restart" class="restart-btn">Restart</button>
           </div>
@@ -514,20 +655,13 @@ function buildShell() {
         <section class="game-area">
           <div class="board-wrap">
             <div id="board" class="board" aria-label="Maths grid"></div>
-            <div id="startOverlay" class="start-overlay visible">
-              <div class="overlay-card">
-                <p class="eyebrow">Math challenge</p>
-                <h2>Hit the target value</h2>
-                <p>Drag across adjacent tiles and build a valid arithmetic line.</p>
-                <button id="startBtn" class="primary-btn">Play</button>
-              </div>
-            </div>
           </div>
+
           <aside class="side-panel">
             <div class="info-card">
               <h2>Rules</h2>
-              <p>Drag across adjacent tiles to form a valid expression.</p>
-              <p>Numbers and operators must alternate, and a line cannot pass through two operators in a row.</p>
+              <p>Swipe across adjacent tiles to build a valid expression.</p>
+              <p>Numbers and operators must alternate and cannot sit next to the same type.</p>
             </div>
             <div class="info-card">
               <h2>Current expression</h2>
@@ -539,7 +673,7 @@ function buildShell() {
             </div>
             <div class="info-card status-card">
               <h2>Status</h2>
-              <p id="Status">Select a valid route</p>
+              <p id="Status">Swipe across the board to build an expression</p>
             </div>
             <div class="info-card">
               <h2>High scores</h2>
@@ -550,27 +684,13 @@ function buildShell() {
       </div>
     </div>
 
-    <div id="nameModal" class="modal">
-      <div class="modal-card">
-        <p class="eyebrow">Welcome</p>
-        <h2>Enter your player name</h2>
-        <label class="field-wrap">
-          <span>Player name</span>
-          <input id="playerNameInput" maxlength="18" value="${state.playerName}" />
-        </label>
-        <p id="nameError" class="field-error"></p>
-        <button id="nameSubmitBtn" class="primary-btn">Start</button>
-      </div>
-    </div>
-
     <div id="gameOverModal" class="modal hidden">
       <div class="modal-card">
-        <p class="eyebrow">Round over</p>
+        <p class="eyebrow">Time up</p>
         <h2>Game over</h2>
         <p id="gameOverSummary"></p>
         <div class="modal-actions">
           <button id="playAgainBtn" class="primary-btn">Play again</button>
-          <button id="changeNameBtn" class="secondary-btn">Change name</button>
         </div>
       </div>
     </div>
@@ -580,27 +700,11 @@ function buildShell() {
     button.addEventListener('click', () => setMode(button.dataset.mode));
   });
 
-  document.querySelector('#restart').addEventListener('click', () => {
-    resetGame();
-  });
+  document.querySelector('#homeStartBtn').addEventListener('click', startGame);
+  document.querySelector('#restart').addEventListener('click', resetGame);
 
-  document.querySelector('#startBtn').addEventListener('click', () => {
-    state.hasStarted = true;
-    state.gameEnded = false;
-      document.querySelector('#startOverlay').classList.remove('visible');
-    state.statusMessage = 'Round live — make your move';
-    state.hasStarted = true;
-    if (!state.timerId) startTimer();
-    updateUI();
-  });
-
-  document.querySelector('#nameSubmitBtn').addEventListener('click', startGame);
   document.querySelector('#playAgainBtn').addEventListener('click', () => {
     resetGame();
-    hideGameOverModal();
-  });
-  document.querySelector('#changeNameBtn').addEventListener('click', () => {
-    document.querySelector('#nameModal').classList.remove('hidden');
     hideGameOverModal();
   });
 
@@ -629,11 +733,11 @@ function init() {
   loadLocalBest();
   buildShell();
   state.mode = localStorage.getItem(MODE_KEY) || MODES.normal;
-  const nameModal = document.querySelector('#nameModal');
-  if (nameModal) nameModal.classList.remove('hidden');
+  setScreen('home');
   startNewBoard();
   updateUI();
   renderLeaderboard();
+
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch((error) => {
       console.warn('Service worker registration failed:', error);
