@@ -129,9 +129,25 @@ function spawnUnaryBonus(forcedBonus = null) {
   renderUnaryButtons();
 }
 
+function updateHeaderUnaryStatus() {
+  const status = document.querySelector('#headerUnaryStatus');
+  if (!status) return;
+
+  if (!state.unaryBonus) {
+    status.textContent = '⚡ Idle';
+    status.classList.remove('is-live');
+    return;
+  }
+
+  status.textContent = `⚡ ${state.unaryBonus.label}`;
+  status.classList.add('is-live');
+}
+
 function renderUnaryButtons() {
   const bonusBar = document.querySelector('#bonusBar');
   if (!bonusBar) return;
+
+  updateHeaderUnaryStatus();
 
   if (!state.unaryBonus) {
     bonusBar.innerHTML = '<span class="bonus-empty">No unary bonus active right now</span>';
@@ -854,6 +870,11 @@ function buildShell() {
           <span>Best score</span>
           <strong>${state.bestScore}</strong>
         </div>
+
+        <div class="home-meta home-leaderboard">
+          <span>High scores</span>
+          <ul id="leaderboardList" class="leaderboard-list compact"></ul>
+        </div>
       </div>
     </div>
 
@@ -866,7 +887,10 @@ function buildShell() {
             <h1>MathsGrid</h1>
           </div>
           <div class="header-actions">
-            <button id="rulesBtn" class="rules-btn" type="button" aria-expanded="false" aria-controls="rulesPanel">Rules</button>
+            <div class="rules-stack">
+              <button id="rulesBtn" class="rules-btn" type="button" aria-expanded="false" aria-controls="rulesPanel">Rules</button>
+              <div id="headerUnaryStatus" class="header-unary-status">⚡ Idle</div>
+            </div>
             <span id="Difficulty" class="difficulty-pill">Easy</span>
             <button id="hintBtn" class="secondary-btn" type="button" aria-label="Show a hint">Hint</button>
             <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
@@ -921,14 +945,13 @@ function buildShell() {
               <h2>🧮 Current expression</h2>
               <p id="Expression">-</p>
             </div>
-            <div class="info-card">
-              <h2>🎯 Rules</h2>
-              <p>Swipe across adjacent tiles to build a valid expression.</p>
-              <p>Numbers and operators must alternate and cannot sit next to the same type.</p>
-            </div>
-            <div class="info-card">
-              <h2>High scores</h2>
-              <ul id="leaderboardList" class="leaderboard-list"></ul>
+            <div class="info-card utility-card">
+              <h2>⚙️ Tools</h2>
+              <div class="utility-actions">
+                <button id="utilityHintBtn" class="utility-btn hint-btn" type="button" aria-label="Show a hint">💡 Hint</button>
+                <button id="utilityAudioBtn" class="utility-btn sound-btn" type="button" aria-label="Toggle sound">🔊</button>
+                <button id="utilityRestartBtn" class="utility-btn restart-btn" type="button" aria-label="Restart game">↻</button>
+              </div>
             </div>
             <div class="info-card status-card">
               <h2>✨ Status</h2>
@@ -993,6 +1016,11 @@ function buildShell() {
     hintBtn.addEventListener('click', revealHint);
   }
 
+  const utilityHintBtn = document.querySelector('#utilityHintBtn');
+  if (utilityHintBtn) {
+    utilityHintBtn.addEventListener('click', revealHint);
+  }
+
   const audioButton = document.querySelector('#audioToggleBtn');
   if (audioButton) {
     audioButton.addEventListener('click', () => {
@@ -1000,6 +1028,25 @@ function buildShell() {
       setSoundEnabled(!state.soundEnabled);
     });
     setSoundEnabled(state.soundEnabled);
+  }
+
+  const utilityAudioBtn = document.querySelector('#utilityAudioBtn');
+  if (utilityAudioBtn) {
+    utilityAudioBtn.addEventListener('click', () => {
+      ensureAudioContext();
+      setSoundEnabled(!state.soundEnabled);
+      utilityAudioBtn.textContent = state.soundEnabled ? '🔊' : '🔇';
+      utilityAudioBtn.setAttribute('aria-pressed', String(state.soundEnabled));
+    });
+    utilityAudioBtn.textContent = state.soundEnabled ? '🔊' : '🔇';
+    utilityAudioBtn.setAttribute('aria-pressed', String(state.soundEnabled));
+  }
+
+  const utilityRestartBtn = document.querySelector('#utilityRestartBtn');
+  if (utilityRestartBtn) {
+    utilityRestartBtn.addEventListener('click', () => {
+      resetGame();
+    });
   }
 
   const rulesBtn = document.querySelector('#rulesBtn');
