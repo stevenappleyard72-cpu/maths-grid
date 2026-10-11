@@ -190,6 +190,37 @@ function buildPath(length, randomFn = Math.random) {
   return path;
 }
 
+function chooseUnaryBonus(targetValue, randomFn = Math.random) {
+  const positiveTarget = Number(targetValue);
+  if (!Number.isFinite(positiveTarget)) return null;
+
+  const squareRoot = Math.sqrt(positiveTarget);
+  const isSquareTarget = Number.isInteger(squareRoot) && squareRoot > 0;
+
+  if (isSquareTarget && randomFn() < 0.6) {
+    return {
+      operation: 'square',
+      label: getUnaryLabel('square'),
+    };
+  }
+
+  if (positiveTarget <= 40 && randomFn() < 0.45) {
+    return {
+      operation: 'sqrt',
+      label: getUnaryLabel('sqrt'),
+    };
+  }
+
+  if (randomFn() < 0.3) {
+    return {
+      operation: 'negate',
+      label: getUnaryLabel('negate'),
+    };
+  }
+
+  return null;
+}
+
 function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, minTarget = 12, maxTarget = 225) {
   const ops = ['+', '-', '*', '/'];
   const earlyFriendlyOps = ['+', '-'];
@@ -218,11 +249,7 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
 
     const value = safeEvaluate(expression);
     if (value !== null && value >= minTarget && value <= maxTarget) {
-      const unaryOptions = getUnaryOptions();
-      const unaryBonus = randomFn() < 0.18 ? (() => {
-        const chosen = randomFrom(unaryOptions, randomFn);
-        return { operation: chosen, label: getUnaryLabel(chosen) };
-      })() : null;
+      const unaryBonus = randomFn() < 0.45 ? chooseUnaryBonus(value, randomFn) : null;
       return {
         expression,
         target: value,
@@ -236,7 +263,7 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
   return {
     expression: fallbackExpression,
     target: fallbackTarget,
-    unaryBonus: null,
+    unaryBonus: chooseUnaryBonus(fallbackTarget, randomFn),
   };
 }
 

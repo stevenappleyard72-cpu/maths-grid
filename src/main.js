@@ -83,6 +83,11 @@ function setScreen(screen) {
   if (gameScreen) gameScreen.classList.toggle('hidden', screen !== 'game');
 }
 
+function getDistanceFromTarget(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return Number.POSITIVE_INFINITY;
+  return Math.abs(Number(state.target) - Number(value));
+}
+
 function startNewBoard() {
   state.difficulty = getDifficultyLabel();
   const boardState = createBoardState(state.mode, state.dailyKey, Math.max(1, state.round));
@@ -128,14 +133,19 @@ function renderUnaryButtons() {
     return;
   }
 
-  const viable = state.lastValue !== null && Number.isFinite(applyUnaryBonus(state.lastValue, state.unaryBonus.operation))
-    && Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)) === Number(state.target);
+  const unaryValue = applyUnaryBonus(state.lastValue, state.unaryBonus.operation);
+  const canSolve = state.lastValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) === Number(state.target);
+  const closeEnough = state.lastValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) !== Number(state.target) && getDistanceFromTarget(unaryValue) <= 4;
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = `unary-btn${viable ? ' pulse' : ''}`;
+  button.className = `unary-btn${canSolve || closeEnough ? ' pulse' : ''}`;
   button.dataset.operation = state.unaryBonus.operation;
   button.textContent = state.unaryBonus.label;
-  button.title = `Use ${state.unaryBonus.label} on the current value`;
+  button.title = canSolve
+    ? `Use ${state.unaryBonus.label} to solve the target`
+    : closeEnough
+      ? `Use ${state.unaryBonus.label} for a near-miss solve`
+      : `Use ${state.unaryBonus.label} on the current value`;
   button.addEventListener('click', () => applyUnaryToCurrentValue(state.unaryBonus.operation));
   bonusBar.innerHTML = '';
   bonusBar.appendChild(button);
@@ -563,15 +573,17 @@ function handleBoardSuccess(withUnary = false) {
   const expressionTokens = state.lastExpression.split('');
   const numberCount = expressionTokens.filter((token) => /\d/.test(token)).length;
   const operatorCount = expressionTokens.filter((token) => /[+\-*/]/.test(token)).length;
+  const routeLengthBonus = expressionTokens.length >= 9 ? 36 : expressionTokens.length >= 7 ? 24 : expressionTokens.length >= 5 ? 14 : 8;
   const chainBonus = Math.max(0, expressionTokens.length - 3) * 4;
   const densityBonus = (numberCount + operatorCount) * 3;
-  const unaryBoost = withUnary ? 25 : 0;
+  const streakBonus = state.streak * 12;
+  const unaryBoost = withUnary ? 35 : 0;
   const baseScore = state.mode === MODES.streak ? 18 : 12;
   const extraMultiplier = Math.max(1, Math.floor((numberCount + operatorCount - 2) / 2));
   const multiplierBoost = withUnary ? 2 : 1;
   const nextMultiplier = Math.max(1, state.multiplier + 1 + extraMultiplier) * multiplierBoost;
   state.multiplier = nextMultiplier;
-  const scoreGain = Math.max(10, baseScore + chainBonus + densityBonus + unaryBoost) * state.multiplier;
+  const scoreGain = Math.max(10, baseScore + routeLengthBonus + chainBonus + densityBonus + streakBonus + unaryBoost) * state.multiplier;
   state.streak += 1;
   state.score += scoreGain;
   state.bestScore = Math.max(state.bestScore, state.score);
@@ -648,21 +660,26 @@ function evaluateCurrentExpression() {
     return true;
   }
 
-  state.round = 1;
+  const distanceToTarget = getDistanceFromTarget(state.lastValue);
+  const bonusCanHit = state.unaryBonus && Number.isFinite(Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)))
+    && Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)) === Number(state.target);
+  const closeMiss = distanceToTarget <= 4;
+
   state.streak = 0;
   state.multiplier = 1;
-  const bonusCanHit = state.unaryBonus && Number.isFinite(applyUnaryBonus(state.lastValue, state.unaryBonus.operation))
-    && Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)) === Number(state.target);
+
   state.statusMessage = bonusCanHit
-    ? `Current value ${state.lastValue} is close — the bonus can hit the target.`
-    : `Current value ${state.lastValue} is not the target — multiplier reset and difficulty reset.`;
-  showToast(bonusCanHit ? 'Almost there!' : 'Target missed', 'error');
+    ? `Current value ${state.lastValue} is close — the unary bonus can still hit the target.`
+    : closeMiss
+      ? `Close! ${state.lastValue} is ${distanceToTarget} away from the target — multiplier reset.`
+      : `Current value ${state.lastValue} is not the target — multiplier reset.`;
+  showToast(bonusCanHit ? 'Almost there!' : closeMiss ? `Close! ${distanceToTarget} away` : 'Target missed', closeMiss || bonusCanHit ? 'info' : 'error');
   flashBoard('error');
   updateUI();
   renderUnaryButtons();
   window.setTimeout(() => {
     startNewBoard();
-  }, 320);
+  }, 360);
   return false;
 }
 
