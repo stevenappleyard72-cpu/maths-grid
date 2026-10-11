@@ -150,7 +150,7 @@ function renderUnaryButtons() {
   updateHeaderUnaryStatus();
 
   if (!state.unaryBonus) {
-    bonusBar.innerHTML = '<span class="bonus-empty">No unary bonus active right now</span>';
+    bonusBar.innerHTML = '<span class="bonus-empty">⚡ Idle</span>';
     return;
   }
 
@@ -160,7 +160,7 @@ function renderUnaryButtons() {
   button.type = 'button';
   button.className = `unary-btn${viable ? ' pulse' : ''}`;
   button.dataset.operation = state.unaryBonus.operation;
-  button.textContent = `${state.unaryBonus.label} bonus`;
+  button.textContent = state.unaryBonus.label;
   button.title = `Use ${state.unaryBonus.label} on the current value`;
   button.addEventListener('click', () => applyUnaryToCurrentValue(state.unaryBonus.operation));
   bonusBar.innerHTML = '';
@@ -945,14 +945,6 @@ function buildShell() {
               <h2>🧮 Current expression</h2>
               <p id="Expression">-</p>
             </div>
-            <div class="info-card utility-card">
-              <h2>⚙️ Tools</h2>
-              <div class="utility-actions">
-                <button id="utilityHintBtn" class="utility-btn hint-btn" type="button" aria-label="Show a hint">💡 Hint</button>
-                <button id="utilityAudioBtn" class="utility-btn sound-btn" type="button" aria-label="Toggle sound">🔊</button>
-                <button id="utilityRestartBtn" class="utility-btn restart-btn" type="button" aria-label="Restart game">↻</button>
-              </div>
-            </div>
             <div class="info-card status-card">
               <h2>✨ Status</h2>
               <p id="Status">Swipe across the board to build an expression</p>
@@ -1016,11 +1008,6 @@ function buildShell() {
     hintBtn.addEventListener('click', revealHint);
   }
 
-  const utilityHintBtn = document.querySelector('#utilityHintBtn');
-  if (utilityHintBtn) {
-    utilityHintBtn.addEventListener('click', revealHint);
-  }
-
   const audioButton = document.querySelector('#audioToggleBtn');
   if (audioButton) {
     audioButton.addEventListener('click', () => {
@@ -1028,25 +1015,6 @@ function buildShell() {
       setSoundEnabled(!state.soundEnabled);
     });
     setSoundEnabled(state.soundEnabled);
-  }
-
-  const utilityAudioBtn = document.querySelector('#utilityAudioBtn');
-  if (utilityAudioBtn) {
-    utilityAudioBtn.addEventListener('click', () => {
-      ensureAudioContext();
-      setSoundEnabled(!state.soundEnabled);
-      utilityAudioBtn.textContent = state.soundEnabled ? '🔊' : '🔇';
-      utilityAudioBtn.setAttribute('aria-pressed', String(state.soundEnabled));
-    });
-    utilityAudioBtn.textContent = state.soundEnabled ? '🔊' : '🔇';
-    utilityAudioBtn.setAttribute('aria-pressed', String(state.soundEnabled));
-  }
-
-  const utilityRestartBtn = document.querySelector('#utilityRestartBtn');
-  if (utilityRestartBtn) {
-    utilityRestartBtn.addEventListener('click', () => {
-      resetGame();
-    });
   }
 
   const rulesBtn = document.querySelector('#rulesBtn');
