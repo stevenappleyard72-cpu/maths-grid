@@ -99,15 +99,11 @@ function startNewBoard() {
   state.statusMessage = 'Swipe across the board to build an expression';
   state.dragging = false;
 
-  if (boardState.unaryBonus) {
-    spawnUnaryBonus(boardState.unaryBonus);
-  } else {
-    state.unaryBonus = null;
-    if (state.unaryTimerId) {
-      window.clearTimeout(state.unaryTimerId);
-      state.unaryTimerId = null;
-    }
-  }
+  const guaranteedUnary = boardState.unaryBonus || {
+    operation: getUnaryOptions()[0],
+    label: getUnaryLabel(getUnaryOptions()[0]),
+  };
+  spawnUnaryBonus(guaranteedUnary);
 
   renderBoard();
   updateUI();
@@ -711,6 +707,17 @@ function revealHint() {
   renderBoard();
 }
 
+function toggleRules() {
+  const rulesPanel = document.querySelector('#rulesPanel');
+  if (!rulesPanel) return;
+  const isHidden = rulesPanel.classList.toggle('hidden');
+  const rulesBtn = document.querySelector('#rulesBtn');
+  if (rulesBtn) {
+    rulesBtn.setAttribute('aria-expanded', String(!isHidden));
+    rulesBtn.classList.toggle('is-active', !isHidden);
+  }
+}
+
 function updateUI() {
   const scoreEl = document.querySelector('#Score');
   const bestEl = document.querySelector('#Best');
@@ -859,12 +866,23 @@ function buildShell() {
             <h1>MathsGrid</h1>
           </div>
           <div class="header-actions">
+            <button id="rulesBtn" class="rules-btn" type="button" aria-expanded="false" aria-controls="rulesPanel">Rules</button>
             <span id="Difficulty" class="difficulty-pill">Easy</span>
             <button id="hintBtn" class="secondary-btn" type="button" aria-label="Show a hint">Hint</button>
             <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
             <button id="restart" class="restart-btn">Restart</button>
           </div>
         </header>
+
+        <div id="rulesPanel" class="rules-panel hidden" aria-live="polite">
+          <h2>How to play</h2>
+          <ul>
+            <li>Swipe across adjacent tiles to build an arithmetic line.</li>
+            <li>Numbers and operators must alternate, and you cannot revisit the same tile.</li>
+            <li>Match the target value exactly to win the round.</li>
+            <li>Unary bonuses are active for 8 seconds and can help when they line up with the target.</li>
+          </ul>
+        </div>
 
         <section class="stats">
           <div class="stat-card accent">
@@ -982,6 +1000,11 @@ function buildShell() {
       setSoundEnabled(!state.soundEnabled);
     });
     setSoundEnabled(state.soundEnabled);
+  }
+
+  const rulesBtn = document.querySelector('#rulesBtn');
+  if (rulesBtn) {
+    rulesBtn.addEventListener('click', toggleRules);
   }
 
   window.addEventListener('beforeinstallprompt', (event) => {
