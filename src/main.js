@@ -25,7 +25,6 @@ const state = {
   path: [],
   set: new Set(),
   timerId: null,
-  unaryTimerId: null,
   statusMessage: 'Select a valid route',
   lastExpression: '-',
   lastValue: null,
@@ -117,40 +116,15 @@ function spawnUnaryBonus(forcedBonus = null) {
   const label = forcedBonus?.label || getUnaryLabel(chosen);
   state.unaryBonus = { operation: chosen, label };
 
-  if (state.unaryTimerId) {
-    window.clearTimeout(state.unaryTimerId);
-  }
-
-  state.unaryTimerId = window.setTimeout(() => {
-    state.unaryBonus = null;
-    renderUnaryButtons();
-  }, 8000);
-
   renderUnaryButtons();
-}
-
-function updateHeaderUnaryStatus() {
-  const status = document.querySelector('#headerUnaryStatus');
-  if (!status) return;
-
-  if (!state.unaryBonus) {
-    status.textContent = '⚡ Idle';
-    status.classList.remove('is-live');
-    return;
-  }
-
-  status.textContent = `⚡ ${state.unaryBonus.label}`;
-  status.classList.add('is-live');
 }
 
 function renderUnaryButtons() {
   const bonusBar = document.querySelector('#bonusBar');
   if (!bonusBar) return;
 
-  updateHeaderUnaryStatus();
-
   if (!state.unaryBonus) {
-    bonusBar.innerHTML = '<span class="bonus-empty">⚡ Idle</span>';
+    bonusBar.innerHTML = '<span class="bonus-empty">⚡</span>';
     return;
   }
 
@@ -741,11 +715,9 @@ function updateUI() {
   const timerEl = document.querySelector('#Timer');
   const comboEl = document.querySelector('#Combo');
   const statusEl = document.querySelector('#Status');
-  const expressionEl = document.querySelector('#Expression');
   const difficultyEl = document.querySelector('#Difficulty');
-  const expressionCard = document.querySelector('#Expression')?.closest('.info-card');
 
-  if (!scoreEl || !bestEl || !targetEl || !timerEl || !comboEl || !statusEl || !expressionEl) return;
+  if (!scoreEl || !bestEl || !targetEl || !timerEl || !comboEl || !statusEl) return;
 
   state.difficulty = getDifficultyLabel();
   scoreEl.textContent = state.score;
@@ -754,17 +726,9 @@ function updateUI() {
   timerEl.textContent = `${Math.ceil(state.timeLeft)}s`;
   comboEl.textContent = `x${state.multiplier}`;
   statusEl.textContent = state.statusMessage;
-  expressionEl.textContent = state.lastExpression;
 
   if (difficultyEl) {
     difficultyEl.textContent = state.difficulty;
-  }
-
-  if (expressionCard) {
-    expressionCard.classList.remove('is-good', 'is-warning');
-    if (state.lastExpression && state.lastExpression !== '-') {
-      expressionCard.classList.add('is-good');
-    }
   }
 }
 
@@ -887,10 +851,7 @@ function buildShell() {
             <h1>MathsGrid</h1>
           </div>
           <div class="header-actions">
-            <div class="rules-stack">
-              <button id="rulesBtn" class="rules-btn" type="button" aria-expanded="false" aria-controls="rulesPanel">Rules</button>
-              <div id="headerUnaryStatus" class="header-unary-status">⚡ Idle</div>
-            </div>
+            <button id="rulesBtn" class="rules-btn" type="button" aria-expanded="false" aria-controls="rulesPanel">Rules</button>
             <span id="Difficulty" class="difficulty-pill">Easy</span>
             <button id="hintBtn" class="secondary-btn" type="button" aria-label="Show a hint">Hint</button>
             <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
@@ -904,8 +865,13 @@ function buildShell() {
             <li>Swipe across adjacent tiles to build an arithmetic line.</li>
             <li>Numbers and operators must alternate, and you cannot revisit the same tile.</li>
             <li>Match the target value exactly to win the round.</li>
-            <li>Unary bonuses are active for 8 seconds and can help when they line up with the target.</li>
+            <li>Unary bonuses are refreshed with each new grid and can help when they line up with the target.</li>
           </ul>
+        </div>
+
+        <div class="info-card bonus-card">
+          <h2>⚡ Unary bonus</h2>
+          <div id="bonusBar" class="bonus-bar"></div>
         </div>
 
         <section class="stats">
@@ -937,14 +903,6 @@ function buildShell() {
           </div>
 
           <aside class="side-panel">
-            <div class="info-card bonus-card">
-              <h2>⚡ Unary bonus</h2>
-              <div id="bonusBar" class="bonus-bar"></div>
-            </div>
-            <div class="info-card">
-              <h2>🧮 Current expression</h2>
-              <p id="Expression">-</p>
-            </div>
             <div class="info-card status-card">
               <h2>✨ Status</h2>
               <p id="Status">Swipe across the board to build an expression</p>
