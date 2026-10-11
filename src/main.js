@@ -717,7 +717,7 @@ function updateUI() {
   const statusEl = document.querySelector('#Status');
   const difficultyEl = document.querySelector('#Difficulty');
 
-  if (!scoreEl || !bestEl || !targetEl || !timerEl || !comboEl || !statusEl) return;
+  if (!scoreEl || !bestEl || !targetEl || !timerEl || !comboEl) return;
 
   state.difficulty = getDifficultyLabel();
   scoreEl.textContent = state.score;
@@ -725,7 +725,10 @@ function updateUI() {
   targetEl.textContent = state.target;
   timerEl.textContent = `${Math.ceil(state.timeLeft)}s`;
   comboEl.textContent = `x${state.multiplier}`;
-  statusEl.textContent = state.statusMessage;
+
+  if (statusEl) {
+    statusEl.textContent = state.statusMessage;
+  }
 
   if (difficultyEl) {
     difficultyEl.textContent = state.difficulty;
@@ -902,12 +905,7 @@ function buildShell() {
             <div id="board" class="board" aria-label="Maths grid"></div>
           </div>
 
-          <aside class="side-panel">
-            <div class="info-card status-card">
-              <h2>✨ Status</h2>
-              <p id="Status">Swipe across the board to build an expression</p>
-            </div>
-          </aside>
+          <aside class="side-panel"></aside>
         </section>
       </div>
     </div>
