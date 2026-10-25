@@ -845,7 +845,9 @@ function updateUI() {
     liveValueEl.textContent = liveValue === null ? '—' : String(liveValue);
   }
 
-  timerEl.classList.toggle('is-urgent', state.timeLeft <= 10 && !state.gameEnded);
+  const timerIsUrgent = state.timeLeft <= 10 && !state.gameEnded;
+  timerEl.classList.toggle('is-urgent', timerIsUrgent);
+  timerEl.closest('.timer-hero')?.classList.toggle('is-urgent', timerIsUrgent);
 
   if (statusEl) {
     statusEl.textContent = state.statusMessage;
@@ -1048,15 +1050,19 @@ function buildShell() {
             <span class="label">Streak</span>
             <strong id="Streak">0</strong>
           </div>
-          <div class="stat-card timer">
-            <span class="label">Timer</span>
-            <strong id="Timer">60s</strong>
-          </div>
         </section>
 
         <section class="game-area">
-          <div class="board-wrap">
-            <div id="board" class="board" aria-label="Maths grid"></div>
+          <div class="board-column">
+            <div class="board-wrap">
+              <div id="board" class="board" aria-label="Maths grid"></div>
+            </div>
+
+            <section class="timer-hero" aria-label="Time remaining">
+              <span class="timer-kicker">Time left</span>
+              <strong id="Timer">60s</strong>
+              <span class="timer-subtitle">Keep the combo alive</span>
+            </section>
           </div>
 
           <aside class="side-panel">
