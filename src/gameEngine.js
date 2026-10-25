@@ -29,7 +29,10 @@ function createSeededRandom(seedValue) {
 }
 
 export function getDailyKey(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function getModeLabel(mode) {
@@ -53,11 +56,12 @@ export function safeEvaluate(expression) {
 
   const cleaned = expression.replace(/\s+/g, '');
   if (!/^[0-9+\-*/]+$/.test(cleaned)) return null;
+  if (!isAlternatingExpressionTokens(cleaned.split(''))) return null;
 
   try {
     const value = Function(`"use strict"; return (${cleaned});`)();
     if (!Number.isFinite(value)) return null;
-    return Math.round(Number(value));
+    return Number(value);
   } catch {
     return null;
   }
@@ -94,11 +98,8 @@ export function isSimplePath(path) {
 export function getDifficultyProfile(round, mode = MODES.normal) {
   const roundBoost = Math.max(0, round - 1) * 6;
   const modeBoost = mode === MODES.streak ? 8 : mode === MODES.daily ? 4 : 0;
-  let pathLength = 3 + Math.floor((round - 1) / 3) + (mode === MODES.streak ? 1 : 0);
-  pathLength = Math.min(9, pathLength);
-  if (pathLength % 2 === 0) {
-    pathLength -= 1;
-  }
+  let pathLength = round <= 2 ? 3 : round <= 5 ? 5 : round <= 8 ? 7 : 9;
+  if (mode === MODES.streak) pathLength = Math.min(9, pathLength + 2);
   const maxTarget = Math.min(65, 10 + roundBoost + modeBoost + ((pathLength - 3) * 4));
 
   return {
@@ -248,7 +249,7 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
     if (!isAlternatingExpressionTokens(expression.split(''))) continue;
 
     const value = safeEvaluate(expression);
-    if (value !== null && value >= minTarget && value <= maxTarget) {
+    if (value !== null && Number.isInteger(value) && value >= minTarget && value <= maxTarget) {
       const unaryBonus = randomFn() < 0.45 ? chooseUnaryBonus(value, randomFn) : null;
       return {
         expression,
@@ -272,7 +273,8 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
 
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const seededValue = hashString(`${mode}:${dateKey}:${round}:${attempt}`);
-    const randomFn = createSeededRandom(seededValue + Math.floor(Math.random() * 1000));
+    const randomOffset = mode === MODES.daily ? 0 : Math.floor(Math.random() * 1000000);
+    const randomFn = createSeededRandom(seededValue + randomOffset);
     const path = buildPath(difficulty.pathLength, randomFn);
 
     if (!path || path.length !== difficulty.pathLength || !isSimplePath(path)) {
@@ -286,7 +288,6 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
       difficulty.maxTarget,
     );
 
-    const expectedTokenCount = expression.split('').length;
     if (expression.split('').length !== path.length) {
       continue;
     }
@@ -342,7 +343,13 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
   }
 
   const fallbackLength = difficulty.pathLength;
-  const fallbackExpression = fallbackLength <= 3 ? '3+2' : fallbackLength <= 5 ? '5-2+1' : '6+5-2+1';
+  const fallbackExpression = fallbackLength <= 3
+    ? '3+2'
+    : fallbackLength <= 5
+      ? '5-2+1'
+      : fallbackLength <= 7
+        ? '6+5-2+1'
+        : '6+5-2+1+3';
   const fallbackTarget = safeEvaluate(fallbackExpression) || 5;
   const fallbackPath = buildPath(fallbackLength, createSeededRandom(hashString(`${mode}:${dateKey}:${round}:fallback`)));
   const fallbackBoard = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(null));
@@ -353,6 +360,22 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
       fallbackBoard[cell.row][cell.col] = {
         value: fallbackExpression[i],
         type: isNumberToken(fallbackExpression[i]) ? 'number' : 'operator',
+      };
+    }
+  }
+
+  const fallbackRandom = createSeededRandom(hashString(`${mode}:${dateKey}:${round}:fill`));
+  const fillerNumbers = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  const fillerOperators = ['+', '-', '*', '/'];
+
+  for (let row = 0; row < GRID_SIZE; row += 1) {
+    for (let col = 0; col < GRID_SIZE; col += 1) {
+      if (fallbackBoard[row][col]) continue;
+      const expectedType = getCellType(row, col);
+      const fillerPool = expectedType === 'number' ? fillerNumbers : fillerOperators;
+      fallbackBoard[row][col] = {
+        value: String(randomFrom(fillerPool, fallbackRandom)),
+        type: expectedType,
       };
     }
   }

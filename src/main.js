@@ -37,6 +37,7 @@ const state = {
   gameEnded: false,
   dailyKey: getDailyKey(),
   unaryBonus: null,
+  pendingUnary: false,
   screen: 'home',
   difficulty: 'Easy',
   audioContext: null,
@@ -45,6 +46,7 @@ const state = {
   hintIndex: 0,
   hintReveal: new Set(),
   ambientLoopId: null,
+  lastScoreGain: 0,
 };
 
 const app = document.querySelector('#app');
@@ -69,7 +71,14 @@ function setMode(mode) {
   buttons.forEach((button) => {
     button.classList.toggle('is-active', button.dataset.mode === mode);
   });
+  const leaderboardTitle = document.querySelector('#leaderboardTitle');
+  if (leaderboardTitle) {
+    leaderboardTitle.textContent = mode === MODES.daily
+      ? `Today's high scores`
+      : `${getModeLabel(mode)} high scores`;
+  }
   state.dailyKey = getDailyKey();
+  refreshLeaderboard();
   if (state.hasStarted) {
     startNewBoard();
   }
@@ -100,6 +109,7 @@ function startNewBoard() {
   state.set.clear();
   state.lastExpression = '-';
   state.lastValue = null;
+  state.pendingUnary = false;
   state.statusMessage = 'Swipe across the board to build an expression';
   state.dragging = false;
 
@@ -124,6 +134,14 @@ function spawnUnaryBonus(forcedBonus = null) {
   renderUnaryButtons();
 }
 
+function getCurrentExpressionValue(expression = state.path.map(({ row, col }) => state.board[row][col].value).join('') || state.lastExpression) {
+  if (!expression) return null;
+  const tokens = expression.split('');
+  if (!isAlternatingExpressionTokens(tokens)) return null;
+  const value = safeEvaluate(expression);
+  return value === null ? null : Number(value);
+}
+
 function renderUnaryButtons() {
   const bonusBar = document.querySelector('#bonusBar');
   if (!bonusBar) return;
@@ -133,9 +151,10 @@ function renderUnaryButtons() {
     return;
   }
 
-  const unaryValue = applyUnaryBonus(state.lastValue, state.unaryBonus.operation);
-  const canSolve = state.lastValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) === Number(state.target);
-  const closeEnough = state.lastValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) !== Number(state.target) && getDistanceFromTarget(unaryValue) <= 4;
+  const previewValue = getCurrentExpressionValue() ?? state.lastValue;
+  const unaryValue = previewValue !== null && previewValue !== undefined ? applyUnaryBonus(previewValue, state.unaryBonus.operation) : null;
+  const canSolve = previewValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) === Number(state.target);
+  const closeEnough = previewValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) !== Number(state.target) && getDistanceFromTarget(unaryValue) <= 4;
   const button = document.createElement('button');
   button.type = 'button';
   button.className = `unary-btn${canSolve || closeEnough ? ' pulse' : ''}`;
@@ -153,13 +172,15 @@ function renderUnaryButtons() {
 
 function applyUnaryToCurrentValue(operation) {
   if (state.gameEnded || !state.unaryBonus) return;
-  if (state.lastValue === null || state.lastValue === undefined) {
+  const sourceValue = getCurrentExpressionValue() ?? state.lastValue;
+  if (sourceValue === null || sourceValue === undefined) {
     state.statusMessage = 'Build a valid expression before using the unary bonus.';
     updateUI();
     return;
   }
 
-  const adjusted = applyUnaryBonus(state.lastValue, operation);
+  state.pendingUnary = false;
+  const adjusted = applyUnaryBonus(sourceValue, operation);
   const numericAdjusted = Number(adjusted);
 
   if (adjusted === null || !Number.isFinite(numericAdjusted)) {
@@ -174,7 +195,7 @@ function applyUnaryToCurrentValue(operation) {
   }
 
   if (numericAdjusted === Number(state.target)) {
-    state.lastExpression = `${state.lastValue}${getUnaryLabel(operation)}`;
+    state.lastExpression = `${sourceValue}${getUnaryLabel(operation)}`;
     state.lastValue = numericAdjusted;
     flashBoard('success', true);
     handleBoardSuccess(true);
@@ -236,7 +257,12 @@ async function submitScore(score) {
 
 async function refreshLeaderboard() {
   try {
-    const response = await fetch('/api/leaderboard');
+    const params = new URLSearchParams({ mode: state.mode });
+    if (state.mode === MODES.daily) {
+      params.set('dailyKey', state.dailyKey);
+    }
+    const response = await fetch(`/api/leaderboard?${params.toString()}`);
+    if (!response.ok) throw new Error('Could not load leaderboard');
     const data = await response.json();
     state.leaderboard = Array.isArray(data.entries) ? data.entries : [];
     renderLeaderboard();
@@ -258,7 +284,11 @@ function renderLeaderboard() {
   state.leaderboard.slice(0, 5).forEach((entry, index) => {
     const item = document.createElement('li');
     item.className = 'leaderboard-item';
-    item.innerHTML = `<span>${index + 1}. ${entry.name}</span><strong>${entry.score}</strong>`;
+    const name = document.createElement('span');
+    const score = document.createElement('strong');
+    name.textContent = `${index + 1}. ${String(entry.name || 'Player')}`;
+    score.textContent = String(Number(entry.score) || 0);
+    item.append(name, score);
     list.appendChild(item);
   });
 }
@@ -490,7 +520,15 @@ function renderBoard() {
       tile.dataset.row = String(row);
       tile.dataset.col = String(col);
       tile.textContent = cell.value;
-      tile.title = `Cell ${row + 1}, ${col + 1}`;
+      tile.title = `${cell.type === 'number' ? 'Number' : 'Operator'} ${cell.value}`;
+
+      const pathIndex = state.path.findIndex((pathCell) => pathCell.row === row && pathCell.col === col);
+      if (pathIndex !== -1) {
+        const step = document.createElement('span');
+        step.className = 'path-step';
+        step.textContent = String(pathIndex + 1);
+        tile.appendChild(step);
+      }
 
       if (state.set.has(key)) {
         tile.classList.add('selected');
@@ -498,7 +536,16 @@ function renderBoard() {
 
       if (state.hintReveal.has(key)) {
         tile.classList.add('hint');
+        const hintIndex = state.solutionPath.findIndex((hintCell) => hintCell.row === row && hintCell.col === col);
+        if (hintIndex !== -1 && pathIndex === -1) {
+          const hintStep = document.createElement('span');
+          hintStep.className = 'hint-step';
+          hintStep.textContent = String(hintIndex + 1);
+          tile.appendChild(hintStep);
+        }
       }
+
+      tile.setAttribute('aria-label', `${tile.title}${pathIndex !== -1 ? `, route step ${pathIndex + 1}` : ''}`);
 
       tile.addEventListener('pointerdown', (event) => {
         event.preventDefault();
@@ -513,9 +560,11 @@ function renderBoard() {
 
 function beginDrag(row, col) {
   state.dragging = true;
+  state.pendingUnary = false;
   state.path = [{ row, col }];
   state.set = new Set([`${row},${col}`]);
   state.lastExpression = state.board[row][col].value;
+  state.lastValue = null;
   state.statusMessage = 'Swipe across the grid';
   updateUI();
   renderBoard();
@@ -571,25 +620,25 @@ function extendDrag(row, col) {
 
 function handleBoardSuccess(withUnary = false) {
   const expressionTokens = state.lastExpression.split('');
-  const numberCount = expressionTokens.filter((token) => /\d/.test(token)).length;
-  const operatorCount = expressionTokens.filter((token) => /[+\-*/]/.test(token)).length;
-  const routeLengthBonus = expressionTokens.length >= 9 ? 36 : expressionTokens.length >= 7 ? 24 : expressionTokens.length >= 5 ? 14 : 8;
-  const chainBonus = Math.max(0, expressionTokens.length - 3) * 4;
+  const routeLength = Math.max(3, state.path.length || expressionTokens.length);
+  const numberCount = Math.ceil(routeLength / 2);
+  const operatorCount = Math.floor(routeLength / 2);
+  const routeLengthBonus = routeLength >= 9 ? 36 : routeLength >= 7 ? 24 : routeLength >= 5 ? 14 : 8;
+  const chainBonus = Math.max(0, routeLength - 3) * 4;
   const densityBonus = (numberCount + operatorCount) * 3;
   const streakBonus = state.streak * 12;
   const unaryBoost = withUnary ? 35 : 0;
   const baseScore = state.mode === MODES.streak ? 18 : 12;
-  const extraMultiplier = Math.max(1, Math.floor((numberCount + operatorCount - 2) / 2));
-  const multiplierBoost = withUnary ? 2 : 1;
-  const nextMultiplier = Math.max(1, state.multiplier + 1 + extraMultiplier) * multiplierBoost;
+  const nextMultiplier = Math.min(9, state.multiplier + (withUnary ? 2 : 1));
   state.multiplier = nextMultiplier;
   const scoreGain = Math.max(10, baseScore + routeLengthBonus + chainBonus + densityBonus + streakBonus + unaryBoost) * state.multiplier;
+  state.lastScoreGain = scoreGain;
   state.streak += 1;
   state.score += scoreGain;
   state.bestScore = Math.max(state.bestScore, state.score);
   saveLocalBest();
   state.round += 1;
-  state.timeLeft = Math.min(60, state.timeLeft + 10);
+  state.timeLeft = Math.min(60, state.timeLeft + (state.mode === MODES.streak ? 4 : 6));
   state.statusMessage = withUnary
     ? `Bonus! ${state.lastExpression} = ${state.target} • x${state.multiplier}`
     : `Perfect! ${state.lastExpression} = ${state.target} • x${state.multiplier}`;
@@ -665,21 +714,33 @@ function evaluateCurrentExpression() {
     && Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)) === Number(state.target);
   const closeMiss = distanceToTarget <= 4;
 
+  if (bonusCanHit) {
+    state.pendingUnary = true;
+    state.statusMessage = `Current value ${state.lastValue} is ready — tap ${state.unaryBonus.label} to hit the target.`;
+    showToast('Unary ready', 'info');
+    flashBoard('power');
+    updateUI();
+    renderUnaryButtons();
+    return false;
+  }
+
   state.streak = 0;
   state.multiplier = 1;
 
-  state.statusMessage = bonusCanHit
-    ? `Current value ${state.lastValue} is close — the unary bonus can still hit the target.`
-    : closeMiss
-      ? `Close! ${state.lastValue} is ${distanceToTarget} away from the target — multiplier reset.`
-      : `Current value ${state.lastValue} is not the target — multiplier reset.`;
-  showToast(bonusCanHit ? 'Almost there!' : closeMiss ? `Close! ${distanceToTarget} away` : 'Target missed', closeMiss || bonusCanHit ? 'info' : 'error');
+  if (state.mode === MODES.streak) {
+    state.timeLeft = Math.max(0, state.timeLeft - 5);
+  }
+
+  state.statusMessage = closeMiss
+    ? `Close! ${state.lastValue} is ${distanceToTarget} away. Try another route on this board.`
+    : `${state.lastValue} misses the target. The board stays — try another route.`;
+  if (state.mode === MODES.streak) {
+    state.statusMessage += ' Streak penalty: −5 seconds.';
+  }
+  showToast(closeMiss ? `Close! ${distanceToTarget} away` : 'Target missed', closeMiss ? 'info' : 'error');
   flashBoard('error');
   updateUI();
   renderUnaryButtons();
-  window.setTimeout(() => {
-    startNewBoard();
-  }, 360);
   return false;
 }
 
@@ -688,8 +749,10 @@ function endDrag() {
 
   evaluateCurrentExpression();
   state.dragging = false;
-  state.path = [];
-  state.set.clear();
+  if (!state.pendingUnary) {
+    state.path = [];
+    state.set.clear();
+  }
   renderBoard();
 }
 
@@ -709,9 +772,11 @@ function revealHint() {
   const nextCell = state.solutionPath[state.hintIndex];
   state.hintReveal.add(`${nextCell.row},${nextCell.col}`);
   state.hintIndex += 1;
-  state.statusMessage = `Hint: try the highlighted square${state.hintIndex > 1 ? ' next' : ''}`;
+  state.timeLeft = Math.max(1, state.timeLeft - 3);
+  state.statusMessage = `Hint ${state.hintIndex}/${state.solutionPath.length}: follow the numbered blue route. −3 seconds.`;
   updateUI();
   renderBoard();
+  showToast('Hint revealed • −3 seconds', 'info');
 }
 
 function toggleRules() {
@@ -733,15 +798,32 @@ function updateUI() {
   const comboEl = document.querySelector('#Combo');
   const statusEl = document.querySelector('#Status');
   const difficultyEl = document.querySelector('#Difficulty');
+  const expressionEl = document.querySelector('#Expression');
+  const liveValueEl = document.querySelector('#LiveValue');
+  const roundEl = document.querySelector('#Round');
+  const streakEl = document.querySelector('#Streak');
 
-  if (!scoreEl || !bestEl || !targetEl || !timerEl || !comboEl) return;
+  if (!scoreEl || !targetEl || !timerEl || !comboEl) return;
 
   state.difficulty = getDifficultyLabel();
   scoreEl.textContent = state.score;
-  bestEl.textContent = state.bestScore;
+  if (bestEl) bestEl.textContent = state.bestScore;
   targetEl.textContent = state.target;
   timerEl.textContent = `${Math.ceil(state.timeLeft)}s`;
   comboEl.textContent = `x${state.multiplier}`;
+  if (roundEl) roundEl.textContent = state.round;
+  if (streakEl) streakEl.textContent = state.streak;
+
+  const activeExpression = state.path.length
+    ? state.path.map(({ row, col }) => state.board[row][col].value).join('')
+    : state.lastExpression;
+  if (expressionEl) expressionEl.textContent = activeExpression || '—';
+  if (liveValueEl) {
+    const liveValue = getCurrentExpressionValue(activeExpression);
+    liveValueEl.textContent = liveValue === null ? '—' : String(liveValue);
+  }
+
+  timerEl.classList.toggle('is-urgent', state.timeLeft <= 10 && !state.gameEnded);
 
   if (statusEl) {
     statusEl.textContent = state.statusMessage;
@@ -763,6 +845,8 @@ function startTimer() {
     state.timeLeft = Math.max(0, state.timeLeft - 1);
     if (state.timeLeft <= 0) {
       state.gameEnded = true;
+      window.clearInterval(state.timerId);
+      state.timerId = null;
       stopAmbientTune();
       state.bestScore = Math.max(state.bestScore, state.score);
       saveLocalBest();
@@ -788,6 +872,9 @@ function startGame() {
     if (error) error.textContent = 'Please enter a player name.';
     return;
   }
+
+  const error = document.querySelector('#nameError');
+  if (error) error.textContent = '';
 
   state.playerName = nameValue;
   localStorage.setItem(PLAYER_NAME_KEY, nameValue);
@@ -825,6 +912,22 @@ function resetGame() {
   startAmbientTune();
 }
 
+function returnHome() {
+  if (state.timerId) {
+    window.clearInterval(state.timerId);
+    state.timerId = null;
+  }
+  state.hasStarted = false;
+  state.gameEnded = true;
+  state.dragging = false;
+  stopAmbientTune();
+  hideGameOverModal();
+  setScreen('home');
+  const homeBest = document.querySelector('#HomeBest');
+  if (homeBest) homeBest.textContent = state.bestScore;
+  refreshLeaderboard();
+}
+
 function buildShell() {
   app.innerHTML = `
     <div id="homeScreen" class="screen home-screen">
@@ -832,17 +935,18 @@ function buildShell() {
         <div class="version-chip">build ${APP_VERSION}</div>
         <p class="eyebrow">Target number puzzle</p>
         <h1>MathsGrid</h1>
-        <p class="home-copy">Swipe across adjacent tiles to build a valid arithmetic line. Hit the target before time runs out, and use the bonus unary operator when it lines up.</p>
+        <p class="home-copy">Find the target. Chain a route. Build a ridiculous combo before the clock wins.</p>
 
         <div class="home-mode-picker" aria-label="Game modes">
-          <button class="mode-btn is-active" data-mode="normal">Normal</button>
-          <button class="mode-btn" data-mode="streak">Streak</button>
-          <button class="mode-btn" data-mode="daily">Daily</button>
+          <button class="mode-btn is-active" data-mode="normal"><strong>Normal</strong><span>Explore and retry</span></button>
+          <button class="mode-btn" data-mode="streak"><strong>Streak</strong><span>Mistakes cost 5s</span></button>
+          <button class="mode-btn" data-mode="daily"><strong>Daily</strong><span>Same grid for all</span></button>
         </div>
 
         <label class="field-wrap">
           <span>Player name</span>
-          <input id="playerNameInput" maxlength="18" value="${state.playerName}" />
+          <input id="playerNameInput" maxlength="18" autocomplete="nickname" />
+          <small id="nameError" class="field-error" aria-live="polite"></small>
         </label>
 
         <div class="home-actions">
@@ -852,11 +956,11 @@ function buildShell() {
 
         <div class="home-meta">
           <span>Best score</span>
-          <strong>${state.bestScore}</strong>
+          <strong id="HomeBest">${state.bestScore}</strong>
         </div>
 
         <div class="home-meta home-leaderboard">
-          <span>High scores</span>
+          <span id="leaderboardTitle">Normal high scores</span>
           <ul id="leaderboardList" class="leaderboard-list compact"></ul>
         </div>
       </div>
@@ -871,6 +975,7 @@ function buildShell() {
             <h1>MathsGrid</h1>
           </div>
           <div class="header-actions">
+            <button id="menuBtn" class="rules-btn" type="button">Menu</button>
             <button id="rulesBtn" class="rules-btn" type="button" aria-expanded="false" aria-controls="rulesPanel">Rules</button>
             <span id="Difficulty" class="difficulty-pill">Easy</span>
             <button id="hintBtn" class="secondary-btn" type="button" aria-label="Show a hint">Hint</button>
@@ -885,13 +990,9 @@ function buildShell() {
             <li>Swipe across adjacent tiles to build an arithmetic line.</li>
             <li>Numbers and operators must alternate, and you cannot revisit the same tile.</li>
             <li>Match the target value exactly to win the round.</li>
-            <li>Unary bonuses are refreshed with each new grid and can help when they line up with the target.</li>
+            <li>A wrong route keeps the board in play; Streak mode also removes 5 seconds.</li>
+            <li>Power moves transform your current result, and each numbered hint costs 3 seconds.</li>
           </ul>
-        </div>
-
-        <div class="info-card bonus-card">
-          <h2>⚡ Unary bonus</h2>
-          <div id="bonusBar" class="bonus-bar"></div>
         </div>
 
         <section class="stats">
@@ -900,16 +1001,20 @@ function buildShell() {
             <strong id="Score">0</strong>
           </div>
           <div class="stat-card">
-            <span class="label">Best</span>
-            <strong id="Best">0</strong>
+            <span class="label">Round</span>
+            <strong id="Round">1</strong>
           </div>
-          <div class="stat-card">
+          <div class="stat-card target-stat">
             <span class="label">Target</span>
             <strong id="Target">0</strong>
           </div>
-          <div class="stat-card timer">
+          <div class="stat-card">
             <span class="label">Combo</span>
             <strong id="Combo">x1</strong>
+          </div>
+          <div class="stat-card">
+            <span class="label">Streak</span>
+            <strong id="Streak">0</strong>
           </div>
           <div class="stat-card timer">
             <span class="label">Timer</span>
@@ -922,7 +1027,28 @@ function buildShell() {
             <div id="board" class="board" aria-label="Maths grid"></div>
           </div>
 
-          <aside class="side-panel"></aside>
+          <aside class="side-panel">
+            <div class="info-card equation-card">
+              <h2>Your route</h2>
+              <div id="Expression" class="expression-display">—</div>
+              <div class="live-result"><span>Value</span><strong id="LiveValue">—</strong></div>
+            </div>
+
+            <div class="info-card status-card">
+              <h2>Game feed</h2>
+              <p id="Status" aria-live="polite">Swipe across the board to build an expression</p>
+            </div>
+
+            <div class="info-card bonus-card">
+              <div>
+                <h2>⚡ Power move</h2>
+                <p>Apply it when your route is one transformation away.</p>
+              </div>
+              <div id="bonusBar" class="bonus-bar"></div>
+            </div>
+
+            <div class="round-tip">Hints reveal the route in order and cost 3 seconds.</div>
+          </aside>
         </section>
       </div>
     </div>
@@ -934,10 +1060,13 @@ function buildShell() {
         <p id="gameOverSummary"></p>
         <div class="modal-actions">
           <button id="playAgainBtn" class="primary-btn">Play again</button>
+          <button id="modalHomeBtn" class="secondary-btn">Main menu</button>
         </div>
       </div>
     </div>
   `;
+
+  document.querySelector('#playerNameInput').value = state.playerName;
 
   document.querySelectorAll('[data-mode]').forEach((button) => {
     button.addEventListener('click', () => setMode(button.dataset.mode));
@@ -945,6 +1074,8 @@ function buildShell() {
 
   document.querySelector('#homeStartBtn').addEventListener('click', startGame);
   document.querySelector('#restart').addEventListener('click', resetGame);
+  document.querySelector('#menuBtn').addEventListener('click', returnHome);
+  document.querySelector('#modalHomeBtn').addEventListener('click', returnHome);
 
   document.querySelector('#playAgainBtn').addEventListener('click', () => {
     resetGame();
@@ -1015,11 +1146,10 @@ function buildShell() {
 function init() {
   loadLocalBest();
   buildShell();
-  state.mode = localStorage.getItem(MODE_KEY) || MODES.normal;
+  setMode(state.mode);
   setScreen('home');
   startNewBoard();
   updateUI();
-  renderLeaderboard();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
