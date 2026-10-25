@@ -191,38 +191,29 @@ function buildPath(length, randomFn = Math.random) {
   return path;
 }
 
-function chooseUnaryBonus(targetValue, randomFn = Math.random) {
-  const positiveTarget = Number(targetValue);
-  if (!Number.isFinite(positiveTarget)) return null;
-
-  const squareRoot = Math.sqrt(positiveTarget);
-  const isSquareTarget = Number.isInteger(squareRoot) && squareRoot > 0;
-
-  if (isSquareTarget && randomFn() < 0.6) {
-    return {
-      operation: 'square',
-      label: getUnaryLabel('square'),
-    };
-  }
-
-  if (positiveTarget <= 40 && randomFn() < 0.45) {
-    return {
-      operation: 'sqrt',
-      label: getUnaryLabel('sqrt'),
-    };
-  }
-
-  if (randomFn() < 0.3) {
-    return {
-      operation: 'negate',
-      label: getUnaryLabel('negate'),
-    };
-  }
-
-  return null;
+function getPowerCandidates(value, minTarget, maxTarget) {
+  return getUnaryOptions()
+    .map((operation) => ({
+      operation,
+      label: getUnaryLabel(operation),
+      target: applyUnaryBonus(value, operation),
+    }))
+    .filter(({ target }) => (
+      target !== null
+      && Number.isInteger(target)
+      && target >= minTarget
+      && target <= maxTarget
+      && target !== value
+    ));
 }
 
-function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, minTarget = 12, maxTarget = 225) {
+function generateExpressionForSeed(
+  randomFn = Math.random,
+  requiredLength = 5,
+  minTarget = 12,
+  maxTarget = 225,
+  forcePowerRound = false,
+) {
   const ops = ['+', '-', '*', '/'];
   const earlyFriendlyOps = ['+', '-'];
   const mediumOps = ['+', '-', '*'];
@@ -248,28 +239,65 @@ function generateExpressionForSeed(randomFn = Math.random, requiredLength = 5, m
 
     if (!isAlternatingExpressionTokens(expression.split(''))) continue;
 
-    const value = safeEvaluate(expression);
-    if (value !== null && Number.isInteger(value) && value >= minTarget && value <= maxTarget) {
-      const unaryBonus = randomFn() < 0.45 ? chooseUnaryBonus(value, randomFn) : null;
+    const sourceValue = safeEvaluate(expression);
+    if (sourceValue === null || !Number.isInteger(sourceValue)) continue;
+
+    if (forcePowerRound) {
+      const candidates = getPowerCandidates(sourceValue, minTarget, maxTarget);
+      if (!candidates.length) continue;
+      const chosen = randomFrom(candidates, randomFn);
       return {
         expression,
-        target: value,
-        unaryBonus,
+        target: chosen.target,
+        sourceValue,
+        unaryBonus: {
+          operation: chosen.operation,
+          label: chosen.label,
+        },
+        isPowerRound: true,
+      };
+    }
+
+    if (sourceValue >= minTarget && sourceValue <= maxTarget) {
+      return {
+        expression,
+        target: sourceValue,
+        sourceValue,
+        unaryBonus: null,
+        isPowerRound: false,
       };
     }
   }
 
-  const fallbackExpression = targetTokenCount <= 5 ? '3+2' : targetTokenCount <= 7 ? '5-2+1' : '6+5-2+1';
-  const fallbackTarget = safeEvaluate(fallbackExpression) || 9;
+  const fallbackExpression = forcePowerRound
+    ? targetTokenCount <= 5
+      ? '5-2+1'
+      : targetTokenCount <= 7
+        ? '4+5-1+1'
+        : '9+4-5+2-1'
+    : targetTokenCount <= 5
+      ? '3+2'
+      : targetTokenCount <= 7
+        ? '5-2+1'
+        : '6+5-2+1';
+  const sourceValue = safeEvaluate(fallbackExpression) || 9;
+  const fallbackPower = forcePowerRound
+    ? getPowerCandidates(sourceValue, minTarget, maxTarget)[0]
+    : null;
   return {
     expression: fallbackExpression,
-    target: fallbackTarget,
-    unaryBonus: chooseUnaryBonus(fallbackTarget, randomFn),
+    target: fallbackPower?.target ?? sourceValue,
+    sourceValue,
+    unaryBonus: fallbackPower
+      ? { operation: fallbackPower.operation, label: fallbackPower.label }
+      : null,
+    isPowerRound: Boolean(fallbackPower),
   };
 }
 
 export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), round = 1) {
   const difficulty = getDifficultyProfile(round, mode);
+  const isPowerRound = round % 3 === 0;
 
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const seededValue = hashString(`${mode}:${dateKey}:${round}:${attempt}`);
@@ -281,12 +309,14 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
       continue;
     }
 
-    const { expression, target, unaryBonus } = generateExpressionForSeed(
+    const generated = generateExpressionForSeed(
       randomFn,
       difficulty.pathLength,
       difficulty.minTarget,
       difficulty.maxTarget,
+      isPowerRound,
     );
+    const { expression, target, sourceValue, unaryBonus } = generated;
 
     if (expression.split('').length !== path.length) {
       continue;
@@ -310,8 +340,11 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
       continue;
     }
 
-    const evaluatedTarget = safeEvaluate(pathExpression);
-    if (evaluatedTarget === null || Number(evaluatedTarget) !== Number(target)) {
+    const evaluatedSource = safeEvaluate(pathExpression);
+    const solvedValue = generated.isPowerRound
+      ? applyUnaryBonus(evaluatedSource, unaryBonus?.operation)
+      : evaluatedSource;
+    if (evaluatedSource === null || Number(solvedValue) !== Number(target)) {
       continue;
     }
 
@@ -334,24 +367,32 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
     return {
       board,
       target,
+      sourceValue,
       expression,
       dailyKey: dateKey,
       pathLength: difficulty.pathLength,
       unaryBonus,
+      isPowerRound: generated.isPowerRound,
       path: path.map(({ row, col }) => ({ row, col })),
     };
   }
 
   const fallbackLength = difficulty.pathLength;
-  const fallbackExpression = fallbackLength <= 3
-    ? '3+2'
-    : fallbackLength <= 5
-      ? '5-2+1'
-      : fallbackLength <= 7
-        ? '6+5-2+1'
-        : '6+5-2+1+3';
-  const fallbackTarget = safeEvaluate(fallbackExpression) || 5;
-  const fallbackPath = buildPath(fallbackLength, createSeededRandom(hashString(`${mode}:${dateKey}:${round}:fallback`)));
+  const fallbackGenerated = generateExpressionForSeed(
+    createSeededRandom(hashString(`${mode}:${dateKey}:${round}:fallback-expression`)),
+    fallbackLength,
+    difficulty.minTarget,
+    difficulty.maxTarget,
+    isPowerRound,
+  );
+  const fallbackExpression = fallbackGenerated.expression;
+  let fallbackPath = null;
+  for (let attempt = 0; attempt < 100 && !fallbackPath; attempt += 1) {
+    fallbackPath = buildPath(
+      fallbackLength,
+      createSeededRandom(hashString(`${mode}:${dateKey}:${round}:fallback-path:${attempt}`)),
+    );
+  }
   const fallbackBoard = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(null));
 
   if (fallbackPath && fallbackPath.length === fallbackExpression.length) {
@@ -382,11 +423,13 @@ export function createBoardState(mode = MODES.normal, dateKey = getDailyKey(), r
 
   return {
     board: fallbackBoard,
-    target: fallbackTarget,
+    target: fallbackGenerated.target,
+    sourceValue: fallbackGenerated.sourceValue,
     expression: fallbackExpression,
     dailyKey: dateKey,
     pathLength: fallbackLength,
-    unaryBonus: null,
+    unaryBonus: fallbackGenerated.unaryBonus,
+    isPowerRound: fallbackGenerated.isPowerRound,
     path: (fallbackPath || []).map(({ row, col }) => ({ row, col })),
   };
 }

@@ -6,7 +6,6 @@ import {
   getDailyKey,
   getModeLabel,
   getUnaryLabel,
-  getUnaryOptions,
   applyUnaryBonus,
   isNumberToken,
   safeEvaluate,
@@ -37,6 +36,8 @@ const state = {
   gameEnded: false,
   dailyKey: getDailyKey(),
   unaryBonus: null,
+  isPowerRound: false,
+  powerSourceValue: null,
   pendingUnary: false,
   screen: 'home',
   difficulty: 'Easy',
@@ -102,6 +103,8 @@ function startNewBoard() {
   const boardState = createBoardState(state.mode, state.dailyKey, Math.max(1, state.round));
   state.board = boardState.board;
   state.target = boardState.target;
+  state.isPowerRound = Boolean(boardState.isPowerRound);
+  state.powerSourceValue = boardState.sourceValue ?? null;
   state.solutionPath = boardState.path || [];
   state.hintIndex = 0;
   state.hintReveal = new Set();
@@ -110,28 +113,19 @@ function startNewBoard() {
   state.lastExpression = '-';
   state.lastValue = null;
   state.pendingUnary = false;
-  state.statusMessage = 'Swipe across the board to build an expression';
+  state.statusMessage = state.isPowerRound
+    ? `POWER ROUND! Build the route, then finish with ${boardState.unaryBonus?.label}.`
+    : 'Swipe across the board to build an expression';
   state.dragging = false;
 
-  const guaranteedUnary = boardState.unaryBonus || {
-    operation: getUnaryOptions()[0],
-    label: getUnaryLabel(getUnaryOptions()[0]),
-  };
-  spawnUnaryBonus(guaranteedUnary);
+  state.unaryBonus = boardState.unaryBonus || null;
 
   renderBoard();
   updateUI();
   renderUnaryButtons();
-}
-
-function spawnUnaryBonus(forcedBonus = null) {
-  if (state.gameEnded) return;
-  const options = getUnaryOptions();
-  const chosen = forcedBonus?.operation || options[Math.floor(Math.random() * options.length)];
-  const label = forcedBonus?.label || getUnaryLabel(chosen);
-  state.unaryBonus = { operation: chosen, label };
-
-  renderUnaryButtons();
+  if (state.isPowerRound && state.hasStarted) {
+    showToast(`⚡ POWER ROUND • Finish with ${state.unaryBonus?.label}`, 'info');
+  }
 }
 
 function getCurrentExpressionValue(expression = state.path.map(({ row, col }) => state.board[row][col].value).join('') || state.lastExpression) {
@@ -144,12 +138,28 @@ function getCurrentExpressionValue(expression = state.path.map(({ row, col }) =>
 
 function renderUnaryButtons() {
   const bonusBar = document.querySelector('#bonusBar');
+  const bonusCard = document.querySelector('#bonusCard');
+  const bonusTitle = document.querySelector('#bonusTitle');
+  const bonusDescription = document.querySelector('#bonusDescription');
   if (!bonusBar) return;
 
+  bonusCard?.classList.toggle('is-power-round', state.isPowerRound && Boolean(state.unaryBonus));
+  bonusCard?.classList.toggle('is-dormant', !state.unaryBonus);
+
   if (!state.unaryBonus) {
+    const roundsUntilPower = 3 - (state.round % 3);
+    if (bonusTitle) bonusTitle.textContent = state.isPowerRound ? '⚡ Power spent' : 'Power meter';
+    if (bonusDescription) {
+      bonusDescription.textContent = state.isPowerRound
+        ? 'Keep solving — a new move arrives next cycle.'
+        : `Power Round in ${roundsUntilPower} round${roundsUntilPower === 1 ? '' : 's'}.`;
+    }
     bonusBar.innerHTML = '<span class="bonus-empty">⚡</span>';
     return;
   }
+
+  if (bonusTitle) bonusTitle.textContent = '⚡ POWER ROUND';
+  if (bonusDescription) bonusDescription.textContent = `Find the route, then finish with ${state.unaryBonus.label}.`;
 
   const previewValue = getCurrentExpressionValue() ?? state.lastValue;
   const unaryValue = previewValue !== null && previewValue !== undefined ? applyUnaryBonus(previewValue, state.unaryBonus.operation) : null;
@@ -157,7 +167,7 @@ function renderUnaryButtons() {
   const closeEnough = previewValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) !== Number(state.target) && getDistanceFromTarget(unaryValue) <= 4;
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = `unary-btn${canSolve || closeEnough ? ' pulse' : ''}`;
+  button.className = `unary-btn power-round${canSolve || closeEnough ? ' pulse' : ''}`;
   button.dataset.operation = state.unaryBonus.operation;
   button.textContent = state.unaryBonus.label;
   button.title = canSolve
@@ -496,6 +506,7 @@ function hideGameOverModal() {
 function renderBoard() {
   const boardEl = document.querySelector('#board');
   if (!boardEl) return;
+  boardEl.classList.toggle('is-power-round', state.isPowerRound);
 
   boardEl.onpointermove = (event) => {
     if (!state.dragging || state.gameEnded) return;
@@ -782,12 +793,22 @@ function revealHint() {
 function toggleRules() {
   const rulesPanel = document.querySelector('#rulesPanel');
   if (!rulesPanel) return;
+  setGameMenuOpen(false);
   const isHidden = rulesPanel.classList.toggle('hidden');
   const rulesBtn = document.querySelector('#rulesBtn');
   if (rulesBtn) {
     rulesBtn.setAttribute('aria-expanded', String(!isHidden));
     rulesBtn.classList.toggle('is-active', !isHidden);
   }
+}
+
+function setGameMenuOpen(open) {
+  const menu = document.querySelector('#gameMenuPanel');
+  const button = document.querySelector('#gameMenuBtn');
+  if (!menu || !button) return;
+  menu.classList.toggle('hidden', !open);
+  button.setAttribute('aria-expanded', String(open));
+  button.classList.toggle('is-active', open);
 }
 
 function updateUI() {
@@ -809,6 +830,7 @@ function updateUI() {
   scoreEl.textContent = state.score;
   if (bestEl) bestEl.textContent = state.bestScore;
   targetEl.textContent = state.target;
+  targetEl.closest('.stat-card')?.classList.toggle('is-power-round', state.isPowerRound);
   timerEl.textContent = `${Math.ceil(state.timeLeft)}s`;
   comboEl.textContent = `x${state.multiplier}`;
   if (roundEl) roundEl.textContent = state.round;
@@ -920,6 +942,7 @@ function returnHome() {
   state.hasStarted = false;
   state.gameEnded = true;
   state.dragging = false;
+  setGameMenuOpen(false);
   stopAmbientTune();
   hideGameOverModal();
   setScreen('home');
@@ -969,28 +992,35 @@ function buildShell() {
     <div id="gameScreen" class="screen game-screen hidden">
       <div class="panel">
         <header class="topbar">
-          <div>
+          <div class="game-brand">
             <div class="version-chip">build ${APP_VERSION}</div>
             <p class="eyebrow">Target number puzzle</p>
             <h1>MathsGrid</h1>
           </div>
           <div class="header-actions">
-            <button id="menuBtn" class="rules-btn" type="button">Menu</button>
-            <button id="rulesBtn" class="rules-btn" type="button" aria-expanded="false" aria-controls="rulesPanel">Rules</button>
             <span id="Difficulty" class="difficulty-pill">Easy</span>
-            <button id="hintBtn" class="secondary-btn" type="button" aria-label="Show a hint">Hint</button>
-            <button id="audioToggleBtn" class="sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
-            <button id="restart" class="restart-btn">Restart</button>
+            <button id="hintBtn" class="hint-quick-btn" type="button" aria-label="Show a hint">Hint −3s</button>
+            <button id="gameMenuBtn" class="game-menu-btn" type="button" aria-expanded="false" aria-controls="gameMenuPanel" aria-label="Open game menu">•••</button>
           </div>
         </header>
 
+        <div id="gameMenuPanel" class="game-menu hidden">
+          <p>Game options</p>
+          <button id="rulesBtn" class="menu-action" type="button" aria-expanded="false" aria-controls="rulesPanel">How to play</button>
+          <button id="audioToggleBtn" class="menu-action sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
+          <button id="restart" class="menu-action" type="button">Restart run</button>
+          <button id="menuBtn" class="menu-action danger" type="button">Main menu</button>
+        </div>
+
         <div id="rulesPanel" class="rules-panel hidden" aria-live="polite">
+          <button id="closeRulesBtn" class="overlay-close" type="button" aria-label="Close rules">×</button>
           <h2>How to play</h2>
           <ul>
             <li>Swipe across adjacent tiles to build an arithmetic line.</li>
             <li>Numbers and operators must alternate, and you cannot revisit the same tile.</li>
             <li>Match the target value exactly to win the round.</li>
             <li>A wrong route keeps the board in play; Streak mode also removes 5 seconds.</li>
+            <li>Every third round is a Power Round with a guaranteed route that needs the glowing unary move.</li>
             <li>Power moves transform your current result, and each numbered hint costs 3 seconds.</li>
           </ul>
         </div>
@@ -1039,10 +1069,10 @@ function buildShell() {
               <p id="Status" aria-live="polite">Swipe across the board to build an expression</p>
             </div>
 
-            <div class="info-card bonus-card">
+            <div id="bonusCard" class="info-card bonus-card is-dormant">
               <div>
-                <h2>⚡ Power move</h2>
-                <p>Apply it when your route is one transformation away.</p>
+                <h2 id="bonusTitle">Power meter</h2>
+                <p id="bonusDescription">Power Round in 2 rounds.</p>
               </div>
               <div id="bonusBar" class="bonus-bar"></div>
             </div>
@@ -1073,7 +1103,10 @@ function buildShell() {
   });
 
   document.querySelector('#homeStartBtn').addEventListener('click', startGame);
-  document.querySelector('#restart').addEventListener('click', resetGame);
+  document.querySelector('#restart').addEventListener('click', () => {
+    setGameMenuOpen(false);
+    resetGame();
+  });
   document.querySelector('#menuBtn').addEventListener('click', returnHome);
   document.querySelector('#modalHomeBtn').addEventListener('click', returnHome);
 
@@ -1125,6 +1158,22 @@ function buildShell() {
   if (rulesBtn) {
     rulesBtn.addEventListener('click', toggleRules);
   }
+
+  document.querySelector('#closeRulesBtn').addEventListener('click', toggleRules);
+  document.querySelector('#gameMenuBtn').addEventListener('click', () => {
+    const menu = document.querySelector('#gameMenuPanel');
+    setGameMenuOpen(menu?.classList.contains('hidden'));
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const rulesPanel = document.querySelector('#rulesPanel');
+    if (rulesPanel && !rulesPanel.classList.contains('hidden')) {
+      toggleRules();
+      return;
+    }
+    setGameMenuOpen(false);
+  });
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();

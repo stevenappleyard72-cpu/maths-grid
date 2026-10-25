@@ -153,3 +153,37 @@ test('generated division expressions always have exact integer targets', () => {
     assert.equal(safeEvaluate(result.expression), result.target);
   }
 });
+
+test('every third round guarantees a route solved by its unary power move', () => {
+  for (const mode of Object.values(MODES)) {
+    for (const round of [3, 6, 9]) {
+      for (let sample = 0; sample < 40; sample += 1) {
+        const result = createBoardState(mode, '2026-10-25', round);
+        const routeValue = safeEvaluate(result.expression);
+        const boardRoute = result.path
+          .map(({ row, col }) => result.board[row][col].value)
+          .join('');
+
+        assert.equal(result.isPowerRound, true);
+        assert.ok(result.unaryBonus);
+        assert.equal(boardRoute, result.expression);
+        assert.equal(routeValue, result.sourceValue);
+        assert.notEqual(routeValue, result.target);
+        assert.equal(
+          applyUnaryBonus(routeValue, result.unaryBonus.operation),
+          result.target,
+          `${result.expression} followed by ${result.unaryBonus.operation} should hit ${result.target}`,
+        );
+      }
+    }
+  }
+});
+
+test('ordinary rounds use direct solutions and do not display a unary move', () => {
+  for (const round of [1, 2, 4, 5, 7, 8]) {
+    const result = createBoardState(MODES.normal, '2026-10-25', round);
+    assert.equal(result.isPowerRound, false);
+    assert.equal(result.unaryBonus, null);
+    assert.equal(safeEvaluate(result.expression), result.target);
+  }
+});
