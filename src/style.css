@@ -576,7 +576,7 @@ h1 {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   padding: 10px 12px;
   background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(191,219,254,0.06));
@@ -614,15 +614,68 @@ h1 {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.75), 0 10px 18px rgba(96,165,250,0.08), 0 0 0 1px rgba(255,255,255,0.1);
 }
 
-.target-stat {
-  background: linear-gradient(135deg, #fff0a3, #ffc857 55%, #ff91bd);
-  border-color: rgba(44, 35, 62, 0.34);
-  transform: translateY(-2px);
+.target-hero {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  min-height: 86px;
+  margin: 10px 20px 0;
+  padding: 8px 24px;
+  overflow: hidden;
+  border: 4px solid rgba(29, 31, 57, 0.94);
+  border-radius: 18px;
+  background: linear-gradient(115deg, #ffe15e, #ffb33f 48%, #ff6cae);
+  color: #291735;
+  box-shadow: 6px 6px 0 rgba(29, 31, 57, 0.92), inset 0 2px 0 rgba(255,255,255,0.5);
 }
 
-.target-stat strong {
-  color: #351b36;
-  font-size: clamp(1.35rem, 1.4vw + 0.8rem, 2.15rem);
+.target-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(-45deg, rgba(255,255,255,0.11), rgba(255,255,255,0.11) 7px, transparent 7px, transparent 15px);
+  pointer-events: none;
+}
+
+.target-kicker,
+.target-subtitle {
+  position: relative;
+  z-index: 1;
+  font-family: 'Orbitron', Inter, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.target-kicker {
+  justify-self: end;
+  text-align: right;
+}
+
+.target-subtitle {
+  justify-self: start;
+  max-width: 210px;
+  font-family: Inter, 'Segoe UI', sans-serif;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+}
+
+.target-hero strong {
+  position: relative;
+  z-index: 1;
+  min-width: 3ch;
+  color: #24102e;
+  font-family: 'Orbitron', Inter, sans-serif;
+  font-size: clamp(2.8rem, 5vw, 4.6rem);
+  line-height: 1;
+  text-align: center;
+  letter-spacing: -0.08em;
+  text-shadow: 0 3px 0 rgba(255,255,255,0.42);
 }
 
 .label {
@@ -962,12 +1015,13 @@ h1 {
   box-shadow: inset 0 2px 0 rgba(255,255,255,0.9), 0 0 0 3px rgba(255, 196, 71, 0.2), 0 0 34px rgba(255, 93, 161, 0.2);
 }
 
-.target-stat.is-power-round::after {
+.target-hero.is-power-round::after {
   content: "POWER";
   position: absolute;
-  top: 4px;
-  right: 5px;
-  padding: 2px 4px;
+  top: 7px;
+  right: 9px;
+  z-index: 2;
+  padding: 3px 7px;
   border-radius: 999px;
   background: #6e2459;
   color: white;
@@ -1597,7 +1651,7 @@ h1 {
 
   .stats {
     flex: 0 0 auto;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     padding: 5px 6px;
     gap: 4px;
   }
@@ -1608,20 +1662,44 @@ h1 {
     border-radius: 9px;
   }
 
-  .stats .target-stat { order: 1; }
-  .stats .stat-card:nth-child(1) { order: 2; }
-  .stats .timer { order: 3; }
-  .stats .stat-card:nth-child(4) { order: 4; }
-  .stats .stat-card:nth-child(5) { order: 5; }
-  .stats .stat-card:nth-child(2) { order: 6; }
-
   .label {
     font-size: 0.43rem;
   }
 
-  .stat-card strong,
-  .target-stat strong {
+  .stat-card strong {
     font-size: 0.9rem;
+  }
+
+  .target-hero {
+    flex: 0 0 62px;
+    min-height: 62px;
+    margin: 4px 6px 0;
+    padding: 4px 10px;
+    gap: 8px;
+    border-width: 3px;
+    border-radius: 12px;
+    box-shadow: 3px 3px 0 rgba(29, 31, 57, 0.92), inset 0 1px 0 rgba(255,255,255,0.5);
+  }
+
+  .target-kicker {
+    font-size: 0.58rem;
+    line-height: 1.25;
+  }
+
+  .target-subtitle {
+    font-size: 0.57rem;
+    line-height: 1.2;
+  }
+
+  .target-hero strong {
+    font-size: clamp(2.25rem, 11vw, 3rem);
+  }
+
+  .target-hero.is-power-round::after {
+    top: 3px;
+    right: 4px;
+    padding: 2px 4px;
+    font-size: 0.34rem;
   }
 
   .game-area {

@@ -830,7 +830,7 @@ function updateUI() {
   scoreEl.textContent = state.score;
   if (bestEl) bestEl.textContent = state.bestScore;
   targetEl.textContent = state.target;
-  targetEl.closest('.stat-card')?.classList.toggle('is-power-round', state.isPowerRound);
+  targetEl.closest('.target-hero')?.classList.toggle('is-power-round', state.isPowerRound);
   timerEl.textContent = `${Math.ceil(state.timeLeft)}s`;
   comboEl.textContent = `x${state.multiplier}`;
   if (roundEl) roundEl.textContent = state.round;
@@ -1025,7 +1025,13 @@ function buildShell() {
           </ul>
         </div>
 
-        <section class="stats">
+        <section class="target-hero" aria-label="Current target">
+          <span class="target-kicker">Make this number</span>
+          <strong id="Target">0</strong>
+          <span class="target-subtitle">Your route must equal the target</span>
+        </section>
+
+        <section class="stats" aria-label="Game statistics">
           <div class="stat-card accent">
             <span class="label">Score</span>
             <strong id="Score">0</strong>
@@ -1033,10 +1039,6 @@ function buildShell() {
           <div class="stat-card">
             <span class="label">Round</span>
             <strong id="Round">1</strong>
-          </div>
-          <div class="stat-card target-stat">
-            <span class="label">Target</span>
-            <strong id="Target">0</strong>
           </div>
           <div class="stat-card">
             <span class="label">Combo</span>
