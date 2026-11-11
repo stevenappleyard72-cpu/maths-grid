@@ -3,9 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "VITE_APP_VERSION=$(git rev-parse --short HEAD) vite --host 0.0.0.0 --port 4173",
-    "build": "VITE_APP_VERSION=$(git rev-parse --short HEAD) vite build",
-    "preview": "VITE_APP_VERSION=$(git rev-parse --short HEAD) vite preview --host 0.0.0.0 --port 4173",
+    "dev": "vite --host 0.0.0.0 --port 4173",
+    "build": "vite build",
+    "postbuild": "node scripts/version-offline.cjs",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
     "start": "node server.js",
     "test": "node --test",
     "test:watch": "node --test --watch"
@@ -14,6 +15,7 @@
     "express": "^4.19.2"
   },
   "devDependencies": {
+    "jsdom": "^31.0.0",
     "vite": "^6.4.4"
   }
 }

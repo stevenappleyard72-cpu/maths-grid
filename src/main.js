@@ -1,1232 +1,284 @@
 import './style.css';
-import {
-  GRID_SIZE,
-  ROUND_TIME,
-  MODES,
-  getDailyKey,
-  getModeLabel,
-  getUnaryLabel,
-  applyUnaryBonus,
-  isNumberToken,
-  safeEvaluate,
-  isAlternatingExpressionTokens,
-  createBoardState,
-} from './gameEngine.js';
+import { GRID_SIZE, ROUND_TIME, createRng, createBoard, findTargets, collapseBoard, isAdjacent, getPathSum, validatePath, scorePath, shuffleBoard } from './surgeEngine.js';
+import { sound } from './audio.js';
 
-const state = {
-  board: [],
-  target: 0,
-  score: 0,
-  bestScore: 0,
-  round: 1,
-  timeLeft: ROUND_TIME,
-  dragging: false,
-  path: [],
-  set: new Set(),
-  timerId: null,
-  statusMessage: 'Select a valid route',
-  lastExpression: '-',
-  lastValue: null,
-  hasStarted: false,
-  streak: 0,
-  multiplier: 1,
-  playerName: 'Player',
-  leaderboard: [],
-  mode: MODES.normal,
-  gameEnded: false,
-  dailyKey: getDailyKey(),
-  unaryBonus: null,
-  isPowerRound: false,
-  powerSourceValue: null,
-  pendingUnary: false,
-  screen: 'home',
-  difficulty: 'Easy',
-  audioContext: null,
-  soundEnabled: true,
-  solutionPath: [],
-  hintIndex: 0,
-  hintReveal: new Set(),
-  ambientLoopId: null,
-  lastScoreGain: 0,
+const $ = (selector) => document.querySelector(selector);
+const icons = {
+  bolt: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 2 4 14h7l-1 8 10-12h-7l1-8Z" fill="currentColor"/></svg>',
+  arrow: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  sound: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m11 5-6 4H2v6h3l6 4V5Zm5 3a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  mute: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m11 5-6 4H2v6h3l6 4V5Zm5 4 6 6m0-6-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>',
+  shuffle: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6h3c5 0 7 12 12 12h3m-4-4 4 4-4 4M3 18h3c2 0 4-3 6-6s4-6 6-6h3m-4-4 4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  hint: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0c-1 .8-1 2-1 2H9s0-1.2-1-2Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  trophy: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h10v6a5 5 0 0 1-10 0V3Zm0 2H3v3a4 4 0 0 0 4 4m10-7h4v3a4 4 0 0 1-4 4m-5 2v6m-4 1h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
 };
+const storage = {
+  get(key, fallback) { try { return JSON.parse(localStorage.getItem(`sumsurge-${key}`)) ?? fallback; } catch { return fallback; } },
+  set(key, value) { try { localStorage.setItem(`sumsurge-${key}`, JSON.stringify(value)); } catch { /* Play works without storage. */ } },
+};
+const modes = {
+  rush: { label: 'Rush', caption: '90 seconds. Chase the high.', icon: '01' },
+  zen: { label: 'Zen', caption: 'No clock. Just one more chain.', icon: '02' },
+  daily: { label: 'Daily', caption: 'One seed. A fresh challenge.', icon: '03' },
+};
+const state = {
+  mode:'rush',phase:'ready',board:[],targets:[],targetIndex:0,path:[],hint:[],rng:createRng(`${Date.now()}-${Math.random()}`),
+  score:0,clears:0,longest:0,combo:1,comboUntil:0,charge:0,surgeUntil:0,time:ROUND_TIME,
+  hints:3,shuffles:2,lastTick:0,drag:false,moved:false,pointerId:null,locked:false,
+  muted:storage.get('muted',false),music:storage.get('music',true),records:storage.get('records',{}),
+  history:storage.get('history',[]),runToken:0,focusIndex:0,
+};
+let feedbackTimeout, hintTimeout, animationTimer, pausedAt, returnFocus;
+const dayKey = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const recordKey = () => state.mode === 'daily' ? `daily-${state.runDay || dayKey()}` : state.mode;
+const best = () => Number(state.records[recordKey()] || 0);
+const target = () => state.targets[state.targetIndex]?.value || 0;
+const active = () => state.phase === 'playing' && !state.locked;
+const isSurge = () => state.surgeUntil > performance.now();
+const formatScore = (n) => Math.round(n).toLocaleString('en-GB');
 
-const app = document.querySelector('#app');
-const BEST_SCORE_KEY = 'mathsgrid-best-score';
-const PLAYER_NAME_KEY = 'mathsgrid-player-name';
-const MODE_KEY = 'mathsgrid-mode';
-const SOUND_KEY = 'mathsgrid-sound-enabled';
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'dev';
-let deferredPrompt = null;
+$('#app').innerHTML = `
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div class="noise"></div>
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="brand" href="#" aria-label="Sum Surge home"><span class="brand-mark">${icons.bolt}</span><span>SUM<span class="brand-slash">/</span>SURGE</span><small>BY MATHSGRID</small></a>
+      <nav class="header-actions" aria-label="Game settings"><span class="local-badge"><i></i> A LITTLE DAILY BRAIN POWER</span><button class="text-button" id="howToBtn">How to play <span>↗</span></button><button class="icon-button" id="soundBtn" aria-label="Mute sound" aria-pressed="true">${icons.sound}</button></nav>
+    </header>
+    <main class="game-layout">
+      <aside class="intro-panel">
+        <div class="eyebrow"><span class="tiny-line"></span> THE NUMBERS ARE ONLY THE BEGINNING</div>
+        <h1>Small numbers.<br>Big <span>energy.</span><span class="heading-spark">✳</span></h1>
+        <p class="intro-copy">Find a connection. Make the target.<br>Get into the flow.</p>
+        <div class="mode-picker" role="group" aria-label="Game mode">
+          ${Object.entries(modes).map(([key,mode])=>`<button class="mode-button ${key==='rush'?'selected':''}" data-mode="${key}" aria-pressed="${key==='rush'}"><span class="mode-number">${mode.icon}</span><span class="mode-content"><strong>${mode.label}${key==='daily'?'<span class="new-dot"></span>':''}</strong><small>${mode.caption}</small></span><span class="mode-radio"></span></button>`).join('')}
+        </div>
+        <button class="start-button" id="startBtn"><span>Let’s play</span>${icons.arrow}</button>
+        <p class="start-note" id="startNote">90 seconds · infinite possibilities</p>
+        <div class="intro-bottom"><span class="mini-star">✳</span><p>A little focus. A lot of <em>“one more go.”</em></p></div>
+      </aside>
+      <section class="play-panel" aria-label="Sum Surge game">
+        <div class="game-topline"><span class="game-label"><i></i> <span id="gameLabel">RUSH CIRCUIT</span></span><div class="game-top-actions"><span id="roundLabel">READY WHEN YOU ARE</span><button id="pauseBtn" class="icon-button small" aria-label="Pause game" disabled>${icons.pause}</button></div></div>
+        <div class="scoreboard"><div class="score-stat"><span class="label">YOUR SCORE</span><strong id="score">0<span>PTS</span></strong></div><div class="clock-stat"><span class="label" id="clockLabel">TIME LEFT</span><strong id="clock">01:30</strong></div><div class="best-stat"><span class="label">PERSONAL BEST</span><strong id="best">—</strong></div></div>
+        <div class="time-track"><div id="timeFill"></div></div>
+        <div class="target-strip"><div><span class="label">MAKE A TARGET</span><p>Pick one. Connect your numbers.</p></div><div class="targets" id="targets" role="group" aria-label="Choose target"></div></div>
+        <div class="board-stage" id="boardStage"><div class="board-glow"></div><svg class="path-lines" id="pathLines" viewBox="0 0 500 500" aria-hidden="true"><polyline id="pathLine" points=""/></svg><div class="board" id="board" role="group" aria-label="Number grid. Connect adjacent tiles, including diagonals."></div><div class="board-particles" id="particles" aria-hidden="true"></div><div class="board-flash" id="boardFlash" aria-hidden="true"></div><div class="board-callout" id="boardCallout" aria-hidden="true"></div></div>
+        <div class="expression-bar" id="expressionBar"><div class="expression-content"><span class="expression-icon">${icons.bolt}</span><span id="expression">Connect tiles. Catch a little lightning.</span></div><button class="expression-clear" id="clearPathBtn" aria-label="Clear selected path" hidden>${icons.close}</button><strong id="liveSum" hidden>0</strong><button class="bank-button" id="bankBtn" hidden>Clear ${icons.arrow}</button></div>
+        <div class="board-toolbar"><button class="tool-button" id="shuffleBtn">${icons.shuffle}<span>Shuffle</span><small id="shuffleCount">2</small></button><span class="toolbar-tip" id="boardTip">Drag or tap · diagonals count</span><button class="tool-button" id="hintBtn">${icons.hint}<span>Hint</span><small id="hintCount">3</small></button></div>
+      </section>
+      <aside class="details-panel">
+        <section class="surge-card"><div class="card-top"><span class="label">THE SURGE</span><span class="surge-icon">${icons.bolt}</span></div><h2 id="surgeTitle">Find your flow.</h2><p id="surgeDescription">Every 5 clears unlocks 10 seconds of double points.</p><div class="charge-meter" id="chargeMeter">${Array.from({length:5},(_,i)=>`<span data-charge="${i}"></span>`).join('')}</div><div class="charge-footer"><span id="chargeLabel">0 / 5 CLEARS</span><strong id="comboLabel">×1</strong></div></section>
+        <section class="quick-guide"><span class="label">A SIMPLE LITTLE OBSESSION</span><div class="guide-row"><span class="guide-index">1</span><p>Connect neighbouring numbers to <strong>make a target.</strong></p></div><div class="guide-row"><span class="guide-index">2</span><p><strong>Longer chains.</strong> Bigger scores. New numbers fall into place.</p></div><div class="guide-row"><span class="guide-index">3</span><p>Find a <span class="inline-charge">✦</span> charged tile for <strong>bonus points.</strong></p></div><div class="mini-demo" aria-hidden="true"><span>3</span><i>+</i><span>4</span><i>+</i><span>5</span><i>=</i><strong>12</strong></div></section>
+        <section class="records-card"><div class="records-title">${icons.trophy}<span class="label">YOUR RECENT RUNS</span></div><div id="recentRuns"></div><p class="local-note">Your progress stays on this device.</p></section>
+      </aside>
+    </main>
+    <footer class="site-footer"><span>A GAME OF CONNECTIONS <span class="footer-dot">·</span> MATHSGRID REIMAGINED</span><button class="text-button music-toggle" id="musicBtn" aria-pressed="true"><span class="equalizer"><i></i><i></i><i></i></span><span id="musicLabel">Music on</span></button><span class="footer-right">LESS SCROLLING. MORE SPARK.</span></footer>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog id="gameDialog" class="game-dialog"><div id="dialogContent"></div></dialog>
+`;
 
-function getDifficultyLabel() {
-  if (state.round <= 2) return 'Easy';
-  if (state.round <= 5) return 'Medium';
-  if (state.round <= 8) return 'Hard';
-  return 'Chaos';
+function prepareBoard() {
+  state.board=createBoard(state.rng);state.targets=findTargets(state.board,state.rng);state.targetIndex=0;state.path=[];state.hint=[];
+  renderBoard();renderTargets();updateUI();
 }
 
-function setMode(mode) {
-  state.mode = mode;
-  localStorage.setItem(MODE_KEY, mode);
-  const buttons = document.querySelectorAll('[data-mode]');
-  buttons.forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.mode === mode);
+function renderBoard(newIds=new Set()) {
+  const hadFocus=$('#board').contains(document.activeElement);
+  $('#board').innerHTML=state.board.map((tile,index)=>`<button type="button" class="tile${tile.charged?' charged':''}${newIds.has(tile.id)?' tile-new':''}" data-index="${index}" data-id="${tile.id}" tabindex="${index===state.focusIndex?0:-1}" aria-label="${tile.value}${tile.charged?', charged, bonus points':''}, row ${Math.floor(index/GRID_SIZE)+1}, column ${index%GRID_SIZE+1}" aria-pressed="false" style="--tile-delay:${Math.floor(index/GRID_SIZE)*28}ms"><span class="tile-number">${tile.value}</span>${tile.charged?'<span class="tile-charge" aria-hidden="true">✦</span>':''}<span class="tile-step" aria-hidden="true"></span></button>`).join('');
+  renderPath();
+  if(hadFocus)$(`[data-index="${state.focusIndex}"]`).focus();
+}
+
+function renderTargets() {
+  $('#targets').innerHTML=state.targets.map((item,index)=>`<button class="target-chip${index===state.targetIndex?' selected':''}" data-target="${index}" aria-label="Target ${item.value}" aria-pressed="${index===state.targetIndex}">${item.value}<span class="target-selected-dot"></span></button>`).join('');
+}
+
+function renderPath() {
+  const sum=getPathSum(state.board,state.path),matching=state.path.length>=2&&sum===target(),over=sum>target();
+  $('#boardStage').classList.toggle('matching',matching);$('#expressionBar').classList.toggle('matching',matching);$('#expressionBar').classList.toggle('over',over);
+  document.querySelectorAll('.tile').forEach((el,index)=>{
+    const step=state.path.indexOf(index),hintStep=state.hint.indexOf(index);
+    el.classList.toggle('selected',step>=0);el.classList.toggle('path-end',step===state.path.length-1&&step>=0);el.classList.toggle('hinted',hintStep>=0);
+    el.classList.toggle('valid-next',state.path.length>0&&step<0&&isAdjacent(state.path.at(-1),index));el.setAttribute('aria-pressed',String(step>=0));
+    el.querySelector('.tile-step').textContent=step>=0?step+1:hintStep>=0?hintStep+1:'';
   });
-  const leaderboardTitle = document.querySelector('#leaderboardTitle');
-  if (leaderboardTitle) {
-    leaderboardTitle.textContent = mode === MODES.daily
-      ? `Today's high scores`
-      : `${getModeLabel(mode)} high scores`;
-  }
-  state.dailyKey = getDailyKey();
-  refreshLeaderboard();
-  if (state.hasStarted) {
-    startNewBoard();
-  }
+  const rect=$('#boardStage').getBoundingClientRect();
+  $('#pathLine').setAttribute('points',state.path.map(index=>{const tile=$(`[data-index="${index}"]`).getBoundingClientRect();return `${(tile.left+tile.width/2-rect.left)/rect.width*500},${(tile.top+tile.height/2-rect.top)/rect.height*500}`;}).join(' '));
+  $('#expression').textContent=state.path.length?state.path.map(index=>state.board[index].value).join(' + '):state.phase==='ready'?'Connect tiles. Catch a little lightning.':'Find your next connection.';
+  $('#liveSum').hidden=!state.path.length;$('#liveSum').textContent=`= ${sum}`;$('#clearPathBtn').hidden=!state.path.length;$('#bankBtn').hidden=!matching;
+  $('#boardTip').textContent=matching?'Target hit! Release to clear.':over?'A little over. Backtrack or try another route.':state.path.length?`${Math.max(0,target()-sum)} more to make ${target()}`:'Drag or tap · diagonals count';
 }
 
-function setScreen(screen) {
-  state.screen = screen;
-  const homeScreen = document.querySelector('#homeScreen');
-  const gameScreen = document.querySelector('#gameScreen');
-  if (homeScreen) homeScreen.classList.toggle('hidden', screen !== 'home');
-  if (gameScreen) gameScreen.classList.toggle('hidden', screen !== 'game');
-}
-
-function getDistanceFromTarget(value) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) return Number.POSITIVE_INFINITY;
-  return Math.abs(Number(state.target) - Number(value));
-}
-
-function startNewBoard() {
-  state.difficulty = getDifficultyLabel();
-  const boardState = createBoardState(state.mode, state.dailyKey, Math.max(1, state.round));
-  state.board = boardState.board;
-  state.target = boardState.target;
-  state.isPowerRound = Boolean(boardState.isPowerRound);
-  state.powerSourceValue = boardState.sourceValue ?? null;
-  state.solutionPath = boardState.path || [];
-  state.hintIndex = 0;
-  state.hintReveal = new Set();
-  state.path = [];
-  state.set.clear();
-  state.lastExpression = '-';
-  state.lastValue = null;
-  state.pendingUnary = false;
-  state.statusMessage = state.isPowerRound
-    ? `POWER ROUND! Build the route, then finish with ${boardState.unaryBonus?.label}.`
-    : 'Swipe across the board to build an expression';
-  state.dragging = false;
-
-  state.unaryBonus = boardState.unaryBonus || null;
-
-  renderBoard();
-  updateUI();
-  renderUnaryButtons();
-  if (state.isPowerRound && state.hasStarted) {
-    showToast(`⚡ POWER ROUND • Finish with ${state.unaryBonus?.label}`, 'info');
-  }
-}
-
-function getCurrentExpressionValue(expression = state.path.map(({ row, col }) => state.board[row][col].value).join('') || state.lastExpression) {
-  if (!expression) return null;
-  const tokens = expression.split('');
-  if (!isAlternatingExpressionTokens(tokens)) return null;
-  const value = safeEvaluate(expression);
-  return value === null ? null : Number(value);
-}
-
-function renderUnaryButtons() {
-  const bonusBar = document.querySelector('#bonusBar');
-  const bonusCard = document.querySelector('#bonusCard');
-  const bonusTitle = document.querySelector('#bonusTitle');
-  const bonusDescription = document.querySelector('#bonusDescription');
-  if (!bonusBar) return;
-
-  bonusCard?.classList.toggle('is-power-round', state.isPowerRound && Boolean(state.unaryBonus));
-  bonusCard?.classList.toggle('is-dormant', !state.unaryBonus);
-
-  if (!state.unaryBonus) {
-    const roundsUntilPower = 3 - (state.round % 3);
-    if (bonusTitle) bonusTitle.textContent = state.isPowerRound ? '⚡ Power spent' : 'Power meter';
-    if (bonusDescription) {
-      bonusDescription.textContent = state.isPowerRound
-        ? 'Keep solving — a new move arrives next cycle.'
-        : `Power Round in ${roundsUntilPower} round${roundsUntilPower === 1 ? '' : 's'}.`;
-    }
-    bonusBar.innerHTML = '<span class="bonus-empty">⚡</span>';
-    return;
-  }
-
-  if (bonusTitle) bonusTitle.textContent = '⚡ POWER ROUND';
-  if (bonusDescription) bonusDescription.textContent = `Find the route, then finish with ${state.unaryBonus.label}.`;
-
-  const previewValue = getCurrentExpressionValue() ?? state.lastValue;
-  const unaryValue = previewValue !== null && previewValue !== undefined ? applyUnaryBonus(previewValue, state.unaryBonus.operation) : null;
-  const canSolve = previewValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) === Number(state.target);
-  const closeEnough = previewValue !== null && Number.isFinite(Number(unaryValue)) && Number(unaryValue) !== Number(state.target) && getDistanceFromTarget(unaryValue) <= 4;
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = `unary-btn power-round${canSolve || closeEnough ? ' pulse' : ''}`;
-  button.dataset.operation = state.unaryBonus.operation;
-  button.textContent = state.unaryBonus.label;
-  button.title = canSolve
-    ? `Use ${state.unaryBonus.label} to solve the target`
-    : closeEnough
-      ? `Use ${state.unaryBonus.label} for a near-miss solve`
-      : `Use ${state.unaryBonus.label} on the current value`;
-  button.addEventListener('click', () => applyUnaryToCurrentValue(state.unaryBonus.operation));
-  bonusBar.innerHTML = '';
-  bonusBar.appendChild(button);
-}
-
-function applyUnaryToCurrentValue(operation) {
-  if (state.gameEnded || !state.unaryBonus) return;
-  const sourceValue = getCurrentExpressionValue() ?? state.lastValue;
-  if (sourceValue === null || sourceValue === undefined) {
-    state.statusMessage = 'Build a valid expression before using the unary bonus.';
-    updateUI();
-    return;
-  }
-
-  state.pendingUnary = false;
-  const adjusted = applyUnaryBonus(sourceValue, operation);
-  const numericAdjusted = Number(adjusted);
-
-  if (adjusted === null || !Number.isFinite(numericAdjusted)) {
-    state.multiplier = 1;
-    state.streak = 0;
-    state.unaryBonus = null;
-    state.statusMessage = 'Unary bonus failed — multiplier reset.';
-    flashBoard('error');
-    renderUnaryButtons();
-    updateUI();
-    return;
-  }
-
-  if (numericAdjusted === Number(state.target)) {
-    state.lastExpression = `${sourceValue}${getUnaryLabel(operation)}`;
-    state.lastValue = numericAdjusted;
-    flashBoard('success', true);
-    handleBoardSuccess(true);
-    return;
-  }
-
-  state.multiplier = 1;
-  state.streak = 0;
-  state.unaryBonus = null;
-  state.statusMessage = 'The unary bonus missed the target — multiplier reset.';
-  flashBoard('error', false);
-  renderUnaryButtons();
-  updateUI();
-}
-
-function saveLocalBest() {
-  localStorage.setItem(BEST_SCORE_KEY, String(state.bestScore));
-}
-
-function loadLocalBest() {
-  const storedBest = Number(localStorage.getItem(BEST_SCORE_KEY) || 0);
-  state.bestScore = storedBest;
-  const storedName = localStorage.getItem(PLAYER_NAME_KEY);
-  if (storedName) {
-    state.playerName = storedName;
-  }
-  const storedMode = localStorage.getItem(MODE_KEY) || MODES.normal;
-  state.mode = Object.values(MODES).includes(storedMode) ? storedMode : MODES.normal;
-  const storedSoundEnabled = localStorage.getItem(SOUND_KEY);
-  state.soundEnabled = storedSoundEnabled === null ? true : storedSoundEnabled !== 'false';
-}
-
-async function submitScore(score) {
-  const value = Number(score || 0);
-  if (!value || value <= 0) return;
-
-  try {
-    const response = await fetch('/api/score', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: state.playerName,
-        score: value,
-        streak: state.streak,
-        mode: state.mode,
-        dailyKey: state.dailyKey,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Could not save score');
-    }
-
-    await refreshLeaderboard();
-  } catch (error) {
-    console.warn('Score sync failed:', error);
-  }
-}
-
-async function refreshLeaderboard() {
-  try {
-    const params = new URLSearchParams({ mode: state.mode });
-    if (state.mode === MODES.daily) {
-      params.set('dailyKey', state.dailyKey);
-    }
-    const response = await fetch(`/api/leaderboard?${params.toString()}`);
-    if (!response.ok) throw new Error('Could not load leaderboard');
-    const data = await response.json();
-    state.leaderboard = Array.isArray(data.entries) ? data.entries : [];
-    renderLeaderboard();
-  } catch (error) {
-    console.warn('Leaderboard unavailable:', error);
-  }
-}
-
-function renderLeaderboard() {
-  const list = document.querySelector('#leaderboardList');
-  if (!list) return;
-
-  list.innerHTML = '';
-  if (!state.leaderboard.length) {
-    list.innerHTML = '<li class="leaderboard-empty">No scores yet</li>';
-    return;
-  }
-
-  state.leaderboard.slice(0, 5).forEach((entry, index) => {
-    const item = document.createElement('li');
-    item.className = 'leaderboard-item';
-    const name = document.createElement('span');
-    const score = document.createElement('strong');
-    name.textContent = `${index + 1}. ${String(entry.name || 'Player')}`;
-    score.textContent = String(Number(entry.score) || 0);
-    item.append(name, score);
-    list.appendChild(item);
-  });
-}
-
-function triggerBoardBurst(type = 'success') {
-  const boardWrap = document.querySelector('.board-wrap');
-  if (!boardWrap) return;
-
-  const colors = {
-    success: ['#4ade80', '#facc15', '#60a5fa'],
-    error: ['#ef4444', '#f97316', '#fdba74'],
-    power: ['#fde68a', '#fca5a5', '#a5b4fc'],
-  };
-
-  const palette = colors[type] || colors.success;
-  for (let i = 0; i < 10; i += 1) {
-    const spark = document.createElement('span');
-    spark.className = 'spark-pair';
-    spark.style.left = `${50 + (Math.random() * 20 - 10)}%`;
-    spark.style.top = `${50 + (Math.random() * 18 - 9)}%`;
-    spark.style.background = palette[i % palette.length];
-    spark.style.setProperty('--dx', `${(Math.random() * 120 - 60).toFixed(1)}px`);
-    spark.style.setProperty('--dy', `${(Math.random() * 120 - 60).toFixed(1)}px`);
-    boardWrap.appendChild(spark);
-
-    window.setTimeout(() => spark.remove(), 700);
-  }
-}
-
-function showComboPop(multiplier, label = 'combo') {
-  const boardWrap = document.querySelector('.board-wrap');
-  if (!boardWrap) return;
-
-  const popup = document.createElement('div');
-  popup.className = 'combo-pop';
-  popup.textContent = `${label === 'bonus' ? 'BONUS ' : ''}x${multiplier}`;
-  popup.style.left = '50%';
-  popup.style.top = '44%';
-  boardWrap.appendChild(popup);
-
-  window.setTimeout(() => popup.remove(), 820);
-}
-
-function setSoundEnabled(enabled) {
-  state.soundEnabled = enabled;
-  localStorage.setItem(SOUND_KEY, String(enabled));
-  const soundButton = document.querySelector('#audioToggleBtn');
-  if (soundButton) {
-    soundButton.innerHTML = enabled ? '🔊 Sound On' : '🔇 Sound Off';
-    soundButton.setAttribute('aria-pressed', String(enabled));
-    soundButton.classList.toggle('is-muted', !enabled);
-  }
-
-  if (enabled) {
-    if (state.hasStarted && !state.gameEnded) {
-      startAmbientTune();
-    }
-  } else {
-    stopAmbientTune();
-  }
-}
-
-function ensureAudioContext() {
-  if (!state.audioContext) {
-    const AudioCtor = window.AudioContext || window.webkitAudioContext;
-    if (AudioCtor) {
-      state.audioContext = new AudioCtor();
-    }
-  }
-  if (state.audioContext && state.audioContext.state === 'suspended') {
-    state.audioContext.resume();
-  }
-  return state.audioContext;
-}
-
-function stopAmbientTune() {
-  if (state.ambientLoopId) {
-    window.clearInterval(state.ambientLoopId);
-    state.ambientLoopId = null;
-  }
-}
-
-function startAmbientTune() {
-  if (!state.soundEnabled || !state.hasStarted || state.gameEnded) return;
-  if (state.ambientLoopId) return;
-
-  const context = ensureAudioContext();
-  if (!context) return;
-
-  const melody = [261.63, 329.63, 392.0, 329.63, 293.66, 349.23, 392.0, 440.0];
-  let step = 0;
-
-  const playStep = () => {
-    if (!state.soundEnabled || !state.hasStarted || state.gameEnded) {
-      stopAmbientTune();
-      return;
-    }
-
-    const oscillator = context.createOscillator();
-    const gainNode = context.createGain();
-    const frequency = melody[step % melody.length];
-    const now = context.currentTime;
-
-    oscillator.type = 'triangle';
-    oscillator.frequency.setValueAtTime(frequency, now);
-    gainNode.gain.setValueAtTime(0.0001, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.012, now + 0.02);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
-
-    oscillator.connect(gainNode);
-    gainNode.connect(context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + 0.25);
-
-    step += 1;
-  };
-
-  playStep();
-  state.ambientLoopId = window.setInterval(playStep, 260);
-}
-
-function playFeedbackCue(type = 'success') {
-  if (!state.soundEnabled) return;
-  const context = ensureAudioContext();
-  if (!context) return;
-
-  const oscillator = context.createOscillator();
-  const gainNode = context.createGain();
-  const now = context.currentTime;
-
-  oscillator.type = type === 'error' ? 'sawtooth' : 'triangle';
-  oscillator.frequency.setValueAtTime(type === 'error' ? 180 : 420, now);
-  gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(0.04, now + 0.01);
-  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + (type === 'error' ? 0.17 : 0.24));
-
-  oscillator.connect(gainNode);
-  gainNode.connect(context.destination);
-  oscillator.start(now);
-  oscillator.stop(now + (type === 'error' ? 0.18 : 0.25));
-}
-
-function showToast(message, tone = 'success') {
-  const container = document.querySelector('#toastContainer') || (() => {
-    const node = document.createElement('div');
-    node.id = 'toastContainer';
-    node.className = 'toast-container';
-    document.body.appendChild(node);
-    return node;
-  })();
-
-  const toast = document.createElement('div');
-  toast.className = `toast ${tone}`;
-  toast.textContent = message;
-  container.appendChild(toast);
-
-  window.setTimeout(() => {
-    toast.classList.add('is-leaving');
-    window.setTimeout(() => toast.remove(), 220);
-  }, 900);
-}
-
-function flashBoard(type, isPower = false) {
-  const board = document.querySelector('#board');
-  const statusCard = document.querySelector('.status-card');
-  if (!board) return;
-  board.classList.remove('success', 'error', 'invalid', 'power');
-  board.classList.add(type);
-  if (statusCard) {
-    statusCard.classList.remove('is-good', 'is-warning');
-    statusCard.classList.add(type === 'success' ? 'is-good' : 'is-warning');
-  }
-
-  if (isPower) {
-    board.classList.add('power');
-  }
-
-  triggerBoardBurst(isPower ? 'power' : type);
-  playFeedbackCue(type === 'error' ? 'error' : 'success');
-
-  window.setTimeout(() => {
-    board.classList.remove(type, 'power');
-    if (statusCard) {
-      statusCard.classList.remove('is-good', 'is-warning');
-    }
-  }, 540);
-}
-
-function showGameOverModal() {
-  const modal = document.querySelector('#gameOverModal');
-  const summary = document.querySelector('#gameOverSummary');
-  if (!modal || !summary) return;
-
-  summary.textContent = `${state.playerName} scored ${state.score} in ${getModeLabel(state.mode)} mode.`;
-  modal.classList.remove('hidden');
-}
-
-function hideGameOverModal() {
-  const modal = document.querySelector('#gameOverModal');
-  if (modal) {
-    modal.classList.add('hidden');
-  }
-}
-
-function renderBoard() {
-  const boardEl = document.querySelector('#board');
-  if (!boardEl) return;
-  boardEl.classList.toggle('is-power-round', state.isPowerRound);
-
-  boardEl.onpointermove = (event) => {
-    if (!state.dragging || state.gameEnded) return;
-    const tile = event.target.closest('.tile');
-    if (!tile) return;
-    const row = Number(tile.dataset.row);
-    const col = Number(tile.dataset.col);
-    if (!Number.isFinite(row) || !Number.isFinite(col)) return;
-    extendDrag(row, col);
-  };
-
-  boardEl.innerHTML = '';
-
-  for (let row = 0; row < GRID_SIZE; row += 1) {
-    for (let col = 0; col < GRID_SIZE; col += 1) {
-      const tile = document.createElement('button');
-      const cell = state.board[row][col];
-      const key = `${row},${col}`;
-
-      tile.type = 'button';
-      tile.className = 'tile';
-      tile.dataset.row = String(row);
-      tile.dataset.col = String(col);
-      tile.textContent = cell.value;
-      tile.title = `${cell.type === 'number' ? 'Number' : 'Operator'} ${cell.value}`;
-
-      const pathIndex = state.path.findIndex((pathCell) => pathCell.row === row && pathCell.col === col);
-      if (pathIndex !== -1) {
-        const step = document.createElement('span');
-        step.className = 'path-step';
-        step.textContent = String(pathIndex + 1);
-        tile.appendChild(step);
-      }
-
-      if (state.set.has(key)) {
-        tile.classList.add('selected');
-      }
-
-      if (state.hintReveal.has(key)) {
-        tile.classList.add('hint');
-        const hintIndex = state.solutionPath.findIndex((hintCell) => hintCell.row === row && hintCell.col === col);
-        if (hintIndex !== -1 && pathIndex === -1) {
-          const hintStep = document.createElement('span');
-          hintStep.className = 'hint-step';
-          hintStep.textContent = String(hintIndex + 1);
-          tile.appendChild(hintStep);
-        }
-      }
-
-      tile.setAttribute('aria-label', `${tile.title}${pathIndex !== -1 ? `, route step ${pathIndex + 1}` : ''}`);
-
-      tile.addEventListener('pointerdown', (event) => {
-        event.preventDefault();
-        if (state.gameEnded) return;
-        beginDrag(row, col);
-      });
-
-      boardEl.appendChild(tile);
-    }
-  }
-}
-
-function beginDrag(row, col) {
-  state.dragging = true;
-  state.pendingUnary = false;
-  state.path = [{ row, col }];
-  state.set = new Set([`${row},${col}`]);
-  state.lastExpression = state.board[row][col].value;
-  state.lastValue = null;
-  state.statusMessage = 'Swipe across the grid';
-  updateUI();
-  renderBoard();
-}
-
-function extendDrag(row, col) {
-  if (!state.dragging || state.gameEnded) return;
-
-  const last = state.path[state.path.length - 1];
-  const key = `${row},${col}`;
-
-  if (row === last.row && col === last.col) {
-    state.lastExpression = state.path.map(({ row: r, col: c }) => state.board[r][c].value).join('');
-    updateUI();
-    return;
-  }
-
-  const previousIndex = state.path.findIndex((cell) => cell.row === row && cell.col === col);
-  if (previousIndex !== -1) {
-    if (previousIndex === state.path.length - 2) {
-      state.path.pop();
-      state.set.delete(key);
-      state.lastExpression = state.path.map(({ row: r, col: c }) => state.board[r][c].value).join('');
-      state.statusMessage = 'Backtracking...';
-      updateUI();
-      renderBoard();
-    }
-    return;
-  }
-
-  const rowDelta = Math.abs(row - last.row);
-  const colDelta = Math.abs(col - last.col);
-  if (rowDelta + colDelta !== 1) return;
-
-  const nextToken = state.board[row][col].value;
-  const previousToken = state.board[last.row][last.col].value;
-  const nextIsNumber = isNumberToken(nextToken);
-  const prevIsNumber = isNumberToken(previousToken);
-
-  if (nextIsNumber === prevIsNumber) {
-    state.statusMessage = 'Numbers and operators must alternate';
-    updateUI();
-    return;
-  }
-
-  state.path.push({ row, col });
-  state.set.add(key);
-  state.lastExpression = state.path.map(({ row: r, col: c }) => state.board[r][c].value).join('');
-  state.statusMessage = 'Expression building...';
-  updateUI();
-  renderBoard();
-}
-
-function handleBoardSuccess(withUnary = false) {
-  const expressionTokens = state.lastExpression.split('');
-  const routeLength = Math.max(3, state.path.length || expressionTokens.length);
-  const numberCount = Math.ceil(routeLength / 2);
-  const operatorCount = Math.floor(routeLength / 2);
-  const routeLengthBonus = routeLength >= 9 ? 36 : routeLength >= 7 ? 24 : routeLength >= 5 ? 14 : 8;
-  const chainBonus = Math.max(0, routeLength - 3) * 4;
-  const densityBonus = (numberCount + operatorCount) * 3;
-  const streakBonus = state.streak * 12;
-  const unaryBoost = withUnary ? 35 : 0;
-  const baseScore = state.mode === MODES.streak ? 18 : 12;
-  const nextMultiplier = Math.min(9, state.multiplier + (withUnary ? 2 : 1));
-  state.multiplier = nextMultiplier;
-  const scoreGain = Math.max(10, baseScore + routeLengthBonus + chainBonus + densityBonus + streakBonus + unaryBoost) * state.multiplier;
-  state.lastScoreGain = scoreGain;
-  state.streak += 1;
-  state.score += scoreGain;
-  state.bestScore = Math.max(state.bestScore, state.score);
-  saveLocalBest();
-  state.round += 1;
-  state.timeLeft = Math.min(60, state.timeLeft + (state.mode === MODES.streak ? 4 : 6));
-  state.statusMessage = withUnary
-    ? `Bonus! ${state.lastExpression} = ${state.target} • x${state.multiplier}`
-    : `Perfect! ${state.lastExpression} = ${state.target} • x${state.multiplier}`;
-  state.unaryBonus = null;
-  showToast(`+${scoreGain} points`, 'success');
-  showComboPop(state.multiplier, withUnary ? 'bonus' : 'combo');
-  flashBoard('success', withUnary);
-  renderUnaryButtons();
-
-  window.setTimeout(() => {
-    startNewBoard();
-  }, 420);
-}
-
-function resetDifficultyAndBoard() {
-  state.round = 1;
-  state.streak = 0;
-  state.multiplier = 1;
-  state.statusMessage = 'Difficulty reset — back to easy mode.';
-  flashBoard('error');
-  window.setTimeout(() => {
-    startNewBoard();
-  }, 260);
-}
-
-function evaluateCurrentExpression() {
-  const expression = state.path.map(({ row, col }) => state.board[row][col].value).join('');
-  state.lastExpression = expression;
-
-  const seenCells = new Set();
-  for (const tile of state.path) {
-    const key = `${tile.row},${tile.col}`;
-    if (seenCells.has(key)) {
-      state.statusMessage = 'You cannot retrace a route through the same tile again';
-      flashBoard('invalid');
-      updateUI();
-      return false;
-    }
-    seenCells.add(key);
-  }
-
-  if (!expression || expression.length < 3) {
-    state.statusMessage = 'Swipe a longer route';
-    flashBoard('invalid');
-    updateUI();
-    return false;
-  }
-
-  const tokens = expression.split('');
-  if (!isAlternatingExpressionTokens(tokens)) {
-    state.statusMessage = 'Numbers and operators must alternate';
-    flashBoard('invalid');
-    updateUI();
-    return false;
-  }
-
-  const value = safeEvaluate(expression);
-  if (value === null) {
-    state.statusMessage = 'That route evaluates to no value.';
-    flashBoard('invalid');
-    updateUI();
-    return false;
-  }
-
-  state.lastValue = Number(value);
-  if (state.lastValue === Number(state.target)) {
-    handleBoardSuccess(false);
-    return true;
-  }
-
-  const distanceToTarget = getDistanceFromTarget(state.lastValue);
-  const bonusCanHit = state.unaryBonus && Number.isFinite(Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)))
-    && Number(applyUnaryBonus(state.lastValue, state.unaryBonus.operation)) === Number(state.target);
-  const closeMiss = distanceToTarget <= 4;
-
-  if (bonusCanHit) {
-    state.pendingUnary = true;
-    state.statusMessage = `Current value ${state.lastValue} is ready — tap ${state.unaryBonus.label} to hit the target.`;
-    showToast('Unary ready', 'info');
-    flashBoard('power');
-    updateUI();
-    renderUnaryButtons();
-    return false;
-  }
-
-  state.streak = 0;
-  state.multiplier = 1;
-
-  if (state.mode === MODES.streak) {
-    state.timeLeft = Math.max(0, state.timeLeft - 5);
-  }
-
-  state.statusMessage = closeMiss
-    ? `Close! ${state.lastValue} is ${distanceToTarget} away. Try another route on this board.`
-    : `${state.lastValue} misses the target. The board stays — try another route.`;
-  if (state.mode === MODES.streak) {
-    state.statusMessage += ' Streak penalty: −5 seconds.';
-  }
-  showToast(closeMiss ? `Close! ${distanceToTarget} away` : 'Target missed', closeMiss ? 'info' : 'error');
-  flashBoard('error');
-  updateUI();
-  renderUnaryButtons();
-  return false;
-}
-
-function endDrag() {
-  if (!state.dragging || state.gameEnded) return;
-
-  evaluateCurrentExpression();
-  state.dragging = false;
-  if (!state.pendingUnary) {
-    state.path = [];
-    state.set.clear();
-  }
-  renderBoard();
-}
-
-function revealHint() {
-  if (!state.solutionPath || !state.solutionPath.length) {
-    showToast('No hint available for this round', 'error');
-    return;
-  }
-
-  if (state.hintIndex >= state.solutionPath.length) {
-    state.statusMessage = 'The full route is already highlighted';
-    updateUI();
-    showToast('Full route is now visible', 'success');
-    return;
-  }
-
-  const nextCell = state.solutionPath[state.hintIndex];
-  state.hintReveal.add(`${nextCell.row},${nextCell.col}`);
-  state.hintIndex += 1;
-  state.timeLeft = Math.max(1, state.timeLeft - 3);
-  state.statusMessage = `Hint ${state.hintIndex}/${state.solutionPath.length}: follow the numbered blue route. −3 seconds.`;
-  updateUI();
-  renderBoard();
-  showToast('Hint revealed • −3 seconds', 'info');
-}
-
-function toggleRules() {
-  const rulesPanel = document.querySelector('#rulesPanel');
-  if (!rulesPanel) return;
-  setGameMenuOpen(false);
-  const isHidden = rulesPanel.classList.toggle('hidden');
-  const rulesBtn = document.querySelector('#rulesBtn');
-  if (rulesBtn) {
-    rulesBtn.setAttribute('aria-expanded', String(!isHidden));
-    rulesBtn.classList.toggle('is-active', !isHidden);
-  }
-}
-
-function setGameMenuOpen(open) {
-  const menu = document.querySelector('#gameMenuPanel');
-  const button = document.querySelector('#gameMenuBtn');
-  if (!menu || !button) return;
-  menu.classList.toggle('hidden', !open);
-  button.setAttribute('aria-expanded', String(open));
-  button.classList.toggle('is-active', open);
+function renderRecords() {
+  const entries=state.history.slice(0,3);
+  $('#recentRuns').innerHTML=entries.length?entries.map((run,i)=>`<div class="recent-run"><span class="recent-number">0${i+1}</span><span>${modes[run.mode]?.label||'Rush'}<small>${run.clears} clears</small></span><strong>${formatScore(run.score)}</strong></div>`).join(''):'<div class="empty-record"><strong>Fresh circuit. Clean slate.</strong><p>Your first run starts a new story.</p></div>';
 }
 
 function updateUI() {
-  const scoreEl = document.querySelector('#Score');
-  const bestEl = document.querySelector('#Best');
-  const targetEl = document.querySelector('#Target');
-  const timerEl = document.querySelector('#Timer');
-  const comboEl = document.querySelector('#Combo');
-  const statusEl = document.querySelector('#Status');
-  const difficultyEl = document.querySelector('#Difficulty');
-  const expressionEl = document.querySelector('#Expression');
-  const liveValueEl = document.querySelector('#LiveValue');
-  const roundEl = document.querySelector('#Round');
-  const streakEl = document.querySelector('#Streak');
-
-  if (!scoreEl || !targetEl || !timerEl || !comboEl) return;
-
-  state.difficulty = getDifficultyLabel();
-  scoreEl.textContent = state.score;
-  if (bestEl) bestEl.textContent = state.bestScore;
-  targetEl.textContent = state.target;
-  targetEl.closest('.target-hero')?.classList.toggle('is-power-round', state.isPowerRound);
-  timerEl.textContent = `${Math.ceil(state.timeLeft)}s`;
-  comboEl.textContent = `x${state.multiplier}`;
-  if (roundEl) roundEl.textContent = state.round;
-  if (streakEl) streakEl.textContent = state.streak;
-
-  const activeExpression = state.path.length
-    ? state.path.map(({ row, col }) => state.board[row][col].value).join('')
-    : state.lastExpression;
-  if (expressionEl) expressionEl.textContent = activeExpression || '—';
-  if (liveValueEl) {
-    const liveValue = getCurrentExpressionValue(activeExpression);
-    liveValueEl.textContent = liveValue === null ? '—' : String(liveValue);
-  }
-
-  const timerIsUrgent = state.timeLeft <= 10 && !state.gameEnded;
-  timerEl.classList.toggle('is-urgent', timerIsUrgent);
-  timerEl.closest('.timer-hero')?.classList.toggle('is-urgent', timerIsUrgent);
-
-  if (statusEl) {
-    statusEl.textContent = state.statusMessage;
-  }
-
-  if (difficultyEl) {
-    difficultyEl.textContent = state.difficulty;
-  }
+  document.body.classList.toggle('is-playing',state.phase==='playing'||state.phase==='paused');
+  $('#score').innerHTML=`${formatScore(state.score)}<span>PTS</span>`;$('#best').textContent=best()?formatScore(best()):'—';
+  const seconds=Math.max(0,Math.ceil(state.time));
+  $('#clock').textContent=state.mode==='zen'?'∞':`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+  $('#clockLabel').textContent=state.mode==='zen'?'NO PRESSURE':'TIME LEFT';$('#clock').classList.toggle('urgent',seconds<=10&&state.mode!=='zen');
+  $('#timeFill').style.width=`${state.mode==='zen'?100:state.time/ROUND_TIME*100}%`;$('#timeFill').classList.toggle('urgent',seconds<=10&&state.mode!=='zen');
+  $('#pauseBtn').disabled=state.phase!=='playing';$('#gameLabel').textContent=`${modes[state.mode].label.toUpperCase()} CIRCUIT`;
+  $('#roundLabel').textContent=state.phase==='ready'?'READY WHEN YOU ARE':`${state.clears} CLEAR${state.clears===1?'':'S'}`;
+  $('#startBtn').innerHTML=state.phase==='playing'?`<span>${state.mode==='zen'?'Finish session':'Take a breather'}</span>${state.mode==='zen'?icons.arrow:icons.pause}`:`<span>${state.phase==='ended'?'One more go':'Let’s play'}</span>${icons.arrow}`;
+  $('#startNote').textContent=state.mode==='zen'?'No timer · find your own rhythm':state.mode==='daily'?`Today’s circuit · ${new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short',timeZone:'Europe/London'}).format(new Date())}`:'90 seconds · +2 seconds per clear';
+  $('#hintCount').textContent=state.hints;$('#shuffleCount').textContent=state.shuffles;
+  $('#hintBtn').disabled=!state.hints||state.phase==='ended'||state.locked;$('#shuffleBtn').disabled=!state.shuffles||state.phase==='ended'||state.locked;
+  const surge=isSurge();document.querySelectorAll('[data-charge]').forEach((el,i)=>el.classList.toggle('filled',i<state.charge||surge));document.body.classList.toggle('surging',surge);
+  $('#surgeTitle').textContent=surge?'You’re electric.':state.combo>1?'Keep it connected.':'Find your flow.';
+  $('#surgeDescription').textContent=surge?'Double points. Follow that feeling.':'Every 5 clears unlocks 10 seconds of double points.';
+  $('#chargeLabel').textContent=surge?`${Math.ceil((state.surgeUntil-performance.now())/1000)}s OF DOUBLE POINTS`:`${state.charge} / 5 CLEARS`;
+  $('#comboLabel').textContent=`×${state.combo}${surge?' ×2':''}`;$('#surgeDescription').parentElement.classList.toggle('is-surging',surge);
+  $('#soundBtn').innerHTML=state.muted?icons.mute:icons.sound;$('#soundBtn').setAttribute('aria-label',state.muted?'Enable sound':'Mute sound');$('#soundBtn').setAttribute('aria-pressed',String(!state.muted));
+  $('#musicBtn').setAttribute('aria-pressed',String(state.music));$('#musicLabel').textContent=state.music?'Music on':'Music off';$('#musicBtn').classList.toggle('off',!state.music||state.muted);
 }
 
-function startTimer() {
-  if (state.timerId) {
-    window.clearInterval(state.timerId);
-  }
-
-  state.timerId = window.setInterval(() => {
-    if (!state.hasStarted || state.gameEnded) return;
-
-    state.timeLeft = Math.max(0, state.timeLeft - 1);
-    if (state.timeLeft <= 0) {
-      state.gameEnded = true;
-      window.clearInterval(state.timerId);
-      state.timerId = null;
-      stopAmbientTune();
-      state.bestScore = Math.max(state.bestScore, state.score);
-      saveLocalBest();
-      submitScore(state.score);
-      state.statusMessage = 'Time is up!';
-      showGameOverModal();
-      updateUI();
-      return;
-    }
-
-    updateUI();
-  }, 1000);
+function startRun() {
+  const keepBoard=state.phase==='ready'&&(state.mode!=='daily'||state.runDay===dayKey());
+  closeDialog(false);clearTimeout(animationTimer);clearTimeout(hintTimeout);state.runToken++;
+  if(!keepBoard){state.runDay=dayKey();state.rng=createRng(state.mode==='daily'?`sumsurge-v1-${state.runDay}`:`${Date.now()}-${Math.random()}`);}
+  Object.assign(state,{phase:'playing',score:0,clears:0,longest:0,combo:1,comboUntil:0,charge:0,surgeUntil:0,time:ROUND_TIME,hints:3,shuffles:2,lastTick:performance.now(),locked:false,drag:false,pointerId:null});
+  if(!keepBoard)prepareBoard();else{renderPath();updateUI();}
+  sound.setIntensity(.15);sound.unlock();sound.start(state.mode);sound.play('ui');$('#boardCallout').textContent='';toast('Make a target. Start a little spark.');
 }
 
-function startGame() {
-  ensureAudioContext();
-
-  const input = document.querySelector('#playerNameInput');
-  const nameValue = (input?.value || '').trim();
-
-  if (!nameValue) {
-    const error = document.querySelector('#nameError');
-    if (error) error.textContent = 'Please enter a player name.';
-    return;
-  }
-
-  const error = document.querySelector('#nameError');
-  if (error) error.textContent = '';
-
-  state.playerName = nameValue;
-  localStorage.setItem(PLAYER_NAME_KEY, nameValue);
-  setScreen('game');
-  state.score = 0;
-  state.streak = 0;
-  state.round = 1;
-  state.timeLeft = ROUND_TIME;
-  state.gameEnded = false;
-  state.hasStarted = true;
-  state.multiplier = 1;
-  state.dailyKey = getDailyKey();
-  state.lastExpression = '-';
-  state.lastValue = null;
-  startNewBoard();
-  startTimer();
-  startAmbientTune();
-  hideGameOverModal();
+function pickTile(index) {
+  if(!active()||!Number.isInteger(index)||!state.board[index])return;
+  if(state.path.at(-2)===index){state.path.pop();sound.play('undo');renderPath();return;}
+  if(state.path.includes(index)||(state.path.length&&!isAdjacent(state.path.at(-1),index)))return;
+  state.path.push(index);if(!state.path.every((tile,step)=>state.hint[step]===tile))state.hint=[];
+  sound.play('select',{step:state.path.length-1});renderPath();
 }
-
-function resetGame() {
-  state.score = 0;
-  state.streak = 0;
-  state.round = 1;
-  state.timeLeft = ROUND_TIME;
-  state.gameEnded = false;
-  state.multiplier = 1;
-  state.dailyKey = getDailyKey();
-  state.statusMessage = 'Swipe across the board to build an expression';
-  state.lastExpression = '-';
-  state.lastValue = null;
-  startNewBoard();
-  hideGameOverModal();
-  startTimer();
-  startAmbientTune();
-}
-
-function returnHome() {
-  if (state.timerId) {
-    window.clearInterval(state.timerId);
-    state.timerId = null;
-  }
-  state.hasStarted = false;
-  state.gameEnded = true;
-  state.dragging = false;
-  setGameMenuOpen(false);
-  stopAmbientTune();
-  hideGameOverModal();
-  setScreen('home');
-  const homeBest = document.querySelector('#HomeBest');
-  if (homeBest) homeBest.textContent = state.bestScore;
-  refreshLeaderboard();
-}
-
-function buildShell() {
-  app.innerHTML = `
-    <div id="homeScreen" class="screen home-screen">
-      <div class="home-card">
-        <div class="version-chip">build ${APP_VERSION}</div>
-        <p class="eyebrow">Target number puzzle</p>
-        <h1>MathsGrid</h1>
-        <p class="home-copy">Find the target. Chain a route. Build a ridiculous combo before the clock wins.</p>
-
-        <div class="home-mode-picker" aria-label="Game modes">
-          <button class="mode-btn is-active" data-mode="normal"><strong>Normal</strong><span>Explore and retry</span></button>
-          <button class="mode-btn" data-mode="streak"><strong>Streak</strong><span>Mistakes cost 5s</span></button>
-          <button class="mode-btn" data-mode="daily"><strong>Daily</strong><span>Same grid for all</span></button>
-        </div>
-
-        <label class="field-wrap">
-          <span>Player name</span>
-          <input id="playerNameInput" maxlength="18" autocomplete="nickname" />
-          <small id="nameError" class="field-error" aria-live="polite"></small>
-        </label>
-
-        <div class="home-actions">
-          <button id="homeStartBtn" class="primary-btn">Start game</button>
-          <button id="homeInstallBtn" class="install-btn" type="button">Install App</button>
-        </div>
-
-        <div class="home-meta">
-          <span>Best score</span>
-          <strong id="HomeBest">${state.bestScore}</strong>
-        </div>
-
-        <div class="home-meta home-leaderboard">
-          <span id="leaderboardTitle">Normal high scores</span>
-          <ul id="leaderboardList" class="leaderboard-list compact"></ul>
-        </div>
-      </div>
-    </div>
-
-    <div id="gameScreen" class="screen game-screen hidden">
-      <div class="panel">
-        <header class="topbar">
-          <div class="game-brand">
-            <div class="version-chip">build ${APP_VERSION}</div>
-            <p class="eyebrow">Target number puzzle</p>
-            <h1>MathsGrid</h1>
-          </div>
-          <div class="header-actions">
-            <span id="Difficulty" class="difficulty-pill">Easy</span>
-            <button id="hintBtn" class="hint-quick-btn" type="button" aria-label="Show a hint">Hint −3s</button>
-            <button id="gameMenuBtn" class="game-menu-btn" type="button" aria-expanded="false" aria-controls="gameMenuPanel" aria-label="Open game menu">•••</button>
-          </div>
-        </header>
-
-        <div id="gameMenuPanel" class="game-menu hidden">
-          <p>Game options</p>
-          <button id="rulesBtn" class="menu-action" type="button" aria-expanded="false" aria-controls="rulesPanel">How to play</button>
-          <button id="audioToggleBtn" class="menu-action sound-btn" type="button" aria-pressed="true">🔊 Sound On</button>
-          <button id="restart" class="menu-action" type="button">Restart run</button>
-          <button id="menuBtn" class="menu-action danger" type="button">Main menu</button>
-        </div>
-
-        <div id="rulesPanel" class="rules-panel hidden" aria-live="polite">
-          <button id="closeRulesBtn" class="overlay-close" type="button" aria-label="Close rules">×</button>
-          <h2>How to play</h2>
-          <ul>
-            <li>Swipe across adjacent tiles to build an arithmetic line.</li>
-            <li>Numbers and operators must alternate, and you cannot revisit the same tile.</li>
-            <li>Match the target value exactly to win the round.</li>
-            <li>A wrong route keeps the board in play; Streak mode also removes 5 seconds.</li>
-            <li>Every third round is a Power Round with a guaranteed route that needs the glowing unary move.</li>
-            <li>Power moves transform your current result, and each numbered hint costs 3 seconds.</li>
-          </ul>
-        </div>
-
-        <section class="target-hero" aria-label="Current target">
-          <span class="target-kicker">Make this number</span>
-          <strong id="Target">0</strong>
-          <span class="target-subtitle">Your route must equal the target</span>
-        </section>
-
-        <section class="stats" aria-label="Game statistics">
-          <div class="stat-card accent">
-            <span class="label">Score</span>
-            <strong id="Score">0</strong>
-          </div>
-          <div class="stat-card">
-            <span class="label">Round</span>
-            <strong id="Round">1</strong>
-          </div>
-          <div class="stat-card">
-            <span class="label">Combo</span>
-            <strong id="Combo">x1</strong>
-          </div>
-          <div class="stat-card">
-            <span class="label">Streak</span>
-            <strong id="Streak">0</strong>
-          </div>
-        </section>
-
-        <section class="game-area">
-          <div class="board-column">
-            <div class="board-wrap">
-              <div id="board" class="board" aria-label="Maths grid"></div>
-            </div>
-
-            <section class="timer-hero" aria-label="Time remaining">
-              <span class="timer-kicker">Time left</span>
-              <strong id="Timer">60s</strong>
-              <span class="timer-subtitle">Keep the combo alive</span>
-            </section>
-          </div>
-
-          <aside class="side-panel">
-            <div class="info-card equation-card">
-              <h2>Your route</h2>
-              <div id="Expression" class="expression-display">—</div>
-              <div class="live-result"><span>Value</span><strong id="LiveValue">—</strong></div>
-            </div>
-
-            <div class="info-card status-card">
-              <h2>Game feed</h2>
-              <p id="Status" aria-live="polite">Swipe across the board to build an expression</p>
-            </div>
-
-            <div id="bonusCard" class="info-card bonus-card is-dormant">
-              <div>
-                <h2 id="bonusTitle">Power meter</h2>
-                <p id="bonusDescription">Power Round in 2 rounds.</p>
-              </div>
-              <div id="bonusBar" class="bonus-bar"></div>
-            </div>
-
-            <div class="round-tip">Hints reveal the route in order and cost 3 seconds.</div>
-          </aside>
-        </section>
-      </div>
-    </div>
-
-    <div id="gameOverModal" class="modal hidden">
-      <div class="modal-card">
-        <p class="eyebrow">Time up</p>
-        <h2>Game over</h2>
-        <p id="gameOverSummary"></p>
-        <div class="modal-actions">
-          <button id="playAgainBtn" class="primary-btn">Play again</button>
-          <button id="modalHomeBtn" class="secondary-btn">Main menu</button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  document.querySelector('#playerNameInput').value = state.playerName;
-
-  document.querySelectorAll('[data-mode]').forEach((button) => {
-    button.addEventListener('click', () => setMode(button.dataset.mode));
-  });
-
-  document.querySelector('#homeStartBtn').addEventListener('click', startGame);
-  document.querySelector('#restart').addEventListener('click', () => {
-    setGameMenuOpen(false);
-    resetGame();
-  });
-  document.querySelector('#menuBtn').addEventListener('click', returnHome);
-  document.querySelector('#modalHomeBtn').addEventListener('click', returnHome);
-
-  document.querySelector('#playAgainBtn').addEventListener('click', () => {
-    resetGame();
-    hideGameOverModal();
-  });
-
-  const homeInstallButton = document.querySelector('#homeInstallBtn');
-  if (homeInstallButton) {
-    homeInstallButton.addEventListener('click', async () => {
-      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-      if (isStandalone) {
-        homeInstallButton.hidden = true;
-        return;
-      }
-
-      if (!deferredPrompt) {
-        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-        showToast(
-          isIOS ? 'On iPhone: tap Share → Add to Home Screen' : 'Use the browser menu to install this app',
-          'info',
-        );
-        return;
-      }
-
-      deferredPrompt.prompt();
-      await deferredPrompt.userChoice;
-      deferredPrompt = null;
-      homeInstallButton.hidden = true;
-    });
-  }
-
-  const hintBtn = document.querySelector('#hintBtn');
-  if (hintBtn) {
-    hintBtn.addEventListener('click', revealHint);
-  }
-
-  const audioButton = document.querySelector('#audioToggleBtn');
-  if (audioButton) {
-    audioButton.addEventListener('click', () => {
-      ensureAudioContext();
-      setSoundEnabled(!state.soundEnabled);
-    });
-    setSoundEnabled(state.soundEnabled);
-  }
-
-  const rulesBtn = document.querySelector('#rulesBtn');
-  if (rulesBtn) {
-    rulesBtn.addEventListener('click', toggleRules);
-  }
-
-  document.querySelector('#closeRulesBtn').addEventListener('click', toggleRules);
-  document.querySelector('#gameMenuBtn').addEventListener('click', () => {
-    const menu = document.querySelector('#gameMenuPanel');
-    setGameMenuOpen(menu?.classList.contains('hidden'));
-  });
-
-  window.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return;
-    const rulesPanel = document.querySelector('#rulesPanel');
-    if (rulesPanel && !rulesPanel.classList.contains('hidden')) {
-      toggleRules();
-      return;
-    }
-    setGameMenuOpen(false);
-  });
-
-  window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault();
-    deferredPrompt = event;
-    if (homeInstallButton) {
-      homeInstallButton.hidden = false;
-      homeInstallButton.textContent = 'Install App';
-    }
-  });
-
-  window.addEventListener('appinstalled', () => {
-    if (homeInstallButton) homeInstallButton.hidden = true;
-  });
-
-  window.addEventListener('pointerup', endDrag);
-  window.addEventListener('pointercancel', endDrag);
-}
-
-function init() {
-  loadLocalBest();
-  buildShell();
-  setMode(state.mode);
-  setScreen('home');
-  startNewBoard();
-  updateUI();
-
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
-      registration.addEventListener('updatefound', () => {
-        const installing = registration.installing;
-        if (!installing) return;
-        installing.addEventListener('statechange', () => {
-          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-            window.location.reload();
-          }
-        });
-      });
-
-      if (registration.waiting) {
-        window.location.reload();
-      }
-    }).catch((error) => {
-      console.warn('Service worker registration failed:', error);
-    });
+function clearPath(){state.path=[];state.hint=[];renderPath();}
+function finishPath(fromDrag=false) {
+  if(!active()||!state.path.length)return;
+  if(validatePath(state.board,state.path,target())){resolveClear();return;}
+  if(fromDrag&&state.path.length>1){
+    sound.play('invalid');const sum=getPathSum(state.board,state.path);
+    toast(sum>target()?`${sum} is a little over ${target()}. Try a shorter chain.`:`${sum} of ${target()}. You’re close — try another chain.`);
+    $('#boardStage').classList.add('miss');setTimeout(()=>$('#boardStage').classList.remove('miss'),320);clearPath();
   }
 }
+function burst(indices) {
+  const stage=$('#boardStage').getBoundingClientRect();
+  indices.forEach(index=>{const rect=$(`[data-index="${index}"]`).getBoundingClientRect();for(let i=0;i<6;i++){
+    const dot=document.createElement('i');dot.className='particle';dot.style.cssText=`left:${rect.left+rect.width/2-stage.left}px;top:${rect.top+rect.height/2-stage.top}px;--dx:${Math.cos(i*Math.PI/3)*70}px;--dy:${Math.sin(i*Math.PI/3)*70}px;--rotation:${i*60}deg`;
+    $('#particles').append(dot);setTimeout(()=>dot.remove(),650);
+  }});
+}
+function resolveClear() {
+  if(!active()||!validatePath(state.board,state.path,target()))return;
+  state.locked=true;const now=performance.now();state.combo=now<state.comboUntil?Math.min(5,state.combo+1):1;state.comboUntil=now+7000;
+  const indices=[...state.path],gain=scorePath(state.board,indices,{combo:state.combo,surge:isSurge()});
+  state.score+=gain;state.clears++;state.longest=Math.max(state.longest,indices.length);if(state.mode!=='zen')state.time=Math.min(ROUND_TIME,state.time+2);
+  burst(indices);sound.play('clear',{combo:state.combo,length:indices.length});
+  $('#boardCallout').innerHTML=`<strong>+${formatScore(gain)}</strong><span>${indices.length>=5?'BEAUTIFUL CHAIN':state.combo>=3?`${state.combo}× COMBO`:'NICE CONNECTION'}${state.mode!=='zen'?' · +2s':''}</span>`;
+  $('#boardCallout').classList.remove('show');void $('#boardCallout').offsetWidth;$('#boardCallout').classList.add('show');
+  indices.forEach(index=>$(`[data-index="${index}"]`).classList.add('clearing'));
+  if(!isSurge()){state.charge++;if(state.charge>=5){state.charge=0;state.surgeUntil=now+10000;sound.play('surge');toast('SURGE! Double points for 10 seconds.');}}
+  sound.setIntensity(isSurge()?1:Math.min(.8,state.combo/6));updateUI();const token=state.runToken;
+  animationTimer=setTimeout(()=>{
+    if(token!==state.runToken)return;
+    const oldIds=new Set(state.board.map(t=>t.id));state.board=collapseBoard(state.board,indices,state.rng);state.targets=findTargets(state.board,state.rng);state.targetIndex=0;state.path=[];state.hint=[];state.locked=false;
+    renderBoard(new Set(state.board.filter(t=>!oldIds.has(t.id)).map(t=>t.id)));renderTargets();updateUI();
+  },260);
+}
+function toast(message){clearTimeout(feedbackTimeout);$('#toast').textContent=message;$('#toast').classList.add('visible');feedbackTimeout=setTimeout(()=>$('#toast').classList.remove('visible'),2900);}
 
-init();
+function endRun() {
+  if(state.phase!=='playing'&&state.phase!=='paused')return;
+  state.phase='ended';state.runToken++;state.locked=false;state.drag=false;state.surgeUntil=0;state.path=[];clearTimeout(animationTimer);sound.stop();sound.play('end');
+  const previous=best();if(state.score>previous){state.records[recordKey()]=state.score;storage.set('records',state.records);}
+  if(state.clears){state.history.unshift({mode:state.mode,score:state.score,clears:state.clears});state.history=state.history.slice(0,8);storage.set('history',state.history);}
+  renderBoard();updateUI();renderRecords();
+  openDialog(`<span class="dialog-eyebrow">${state.score>previous&&state.score>0?'A NEW PERSONAL BEST':'CIRCUIT COMPLETE'}</span><div class="result-icon">${icons.bolt}</div><h2>${state.clears?'That was electric.':'The next spark is yours.'}</h2><p>${state.clears?'A little focus goes a long way.':'Connect at least two neighbouring tiles to make a target.'}</p><div class="result-score">${formatScore(state.score)}<span>POINTS</span></div><div class="result-stats"><span><strong>${state.clears}</strong>clears</span><span><strong>${state.longest}</strong>longest chain</span><span><strong>${formatScore(best())}</strong>personal best</span></div><button class="start-button" id="againBtn"><span>One more go</span>${icons.arrow}</button><button class="dialog-secondary" id="doneBtn">Back to the circuit</button>`,'results');
+  $('#againBtn').onclick=startRun;$('#doneBtn').onclick=()=>closeDialog(false);
+}
+function pauseGame(reason='pause') {
+  if(state.phase!=='playing')return;
+  state.phase='paused';pausedAt=performance.now();state.drag=false;state.pointerId=null;sound.stop();updateUI();const changing=reason.startsWith('mode:');
+  openDialog(`<span class="dialog-eyebrow">A MOMENT TO RECHARGE</span><h2>${changing?'Switch circuits?':'Take a breath.'}</h2><p>${changing?'Starting another mode will finish this run and save your score.':'Your numbers aren’t going anywhere. The clock is paused.'}</p><button class="start-button" id="resumeBtn"><span>Keep the flow going</span>${icons.arrow}</button>${changing?'<button class="dialog-secondary" id="switchBtn">Finish run & switch mode</button>':'<button class="dialog-secondary" id="finishBtn">Finish this run</button>'}`,'pause');
+  $('#resumeBtn').onclick=resumeGame;if(changing)$('#switchBtn').onclick=()=>{endRun();closeDialog(false);setMode(reason.slice(5));};else $('#finishBtn').onclick=endRun;
+}
+function resumeGame() {
+  if(state.phase!=='paused')return;const duration=performance.now()-pausedAt;
+  if(state.comboUntil)state.comboUntil+=duration;if(state.surgeUntil)state.surgeUntil+=duration;
+  state.phase='playing';state.lastTick=performance.now();closeDialog(false);sound.unlock();sound.start(state.mode);updateUI();
+}
+function openDialog(html,type) {
+  const dialog=$('#gameDialog');if(!dialog.open)returnFocus=document.activeElement;
+  $('#dialogContent').innerHTML=html;dialog.dataset.type=type;dialog.setAttribute('aria-label',type==='help'?'How to play Sum Surge':type==='results'?'Run results':'Game paused');if(!dialog.open)dialog.showModal();
+}
+function closeDialog(resume=true) {
+  if($('#gameDialog').open)$('#gameDialog').close();if(resume&&state.phase==='paused'){resumeGame();return;}if(returnFocus?.isConnected)returnFocus.focus();
+}
+function showHelp() {
+  const wasPlaying=state.phase==='playing';if(wasPlaying){state.phase='paused';pausedAt=performance.now();state.drag=false;sound.stop();updateUI();}
+  openDialog(`<button class="dialog-close icon-button" id="closeHelp" aria-label="Close instructions">${icons.close}</button><span class="dialog-eyebrow">FIND A CONNECTION</span><h2>Simple sums.<br>Serious flow.</h2><div class="help-example"><span>3</span><i>+</i><span>4</span><i>+</i><span>5</span><i>=</i><strong>12</strong></div><ol class="help-list"><li><strong>Pick a target.</strong> Choose any of the three numbers above the grid. Each has a solution.</li><li><strong>Connect to collect.</strong> Drag through neighbouring tiles, including diagonals, to add them up. Use at least two tiles. Release on the target to clear. You can also tap tiles one at a time.</li><li><strong>Build the momentum.</strong> Longer chains and ✦ charged tiles earn more points. Clear again within 7 seconds to grow your combo up to ×5. Five clears trigger a 10-second double-points surge.</li></ol><p class="help-footnote">Backtrack one tile to undo. Escape clears a path. Use arrow keys and Space to select tiles. Each clear adds 2 seconds in Rush and Daily; Zen has no timer. Hints and shuffles reset your combo. Daily uses the same starting seed and refill sequence for everyone today.</p><button class="start-button" id="helpDone"><span>${wasPlaying?'Back to the flow':'Got it. Let’s connect.'}</span>${icons.arrow}</button>`,'help');
+  $('#closeHelp').onclick=()=>closeDialog();$('#helpDone').onclick=()=>closeDialog();
+}
+function setMode(mode) {
+  if(!modes[mode])return;
+  Object.assign(state,{mode,phase:'ready',score:0,clears:0,combo:1,charge:0,surgeUntil:0,time:ROUND_TIME,hints:3,shuffles:2,locked:false});state.runToken++;
+  state.runDay=dayKey();state.rng=createRng(mode==='daily'?`sumsurge-v1-${state.runDay}`:`${Date.now()}-${Math.random()}`);clearTimeout(animationTimer);sound.stop();
+  document.querySelectorAll('[data-mode]').forEach(el=>{el.classList.toggle('selected',el.dataset.mode===mode);el.setAttribute('aria-pressed',String(el.dataset.mode===mode));});prepareBoard();$('#boardCallout').textContent='';
+}
+
+$('#board').addEventListener('pointerdown',event=>{
+  const tile=event.target.closest('[data-index]');if(!tile||event.button!==0||state.pointerId!==null||state.locked)return;
+  if(state.phase==='ready'||state.phase==='ended')startRun();if(!active())return;
+  event.preventDefault();sound.unlock();state.drag=true;state.moved=false;state.pointerId=event.pointerId;$('#board').setPointerCapture(event.pointerId);state.focusIndex=Number(tile.dataset.index);
+  const index=Number(tile.dataset.index);if(state.path.length&&!isAdjacent(state.path.at(-1),index)&&!state.path.includes(index))clearPath();pickTile(index);
+});
+$('#board').addEventListener('pointermove',event=>{
+  if(!state.drag||!active()||event.pointerId!==state.pointerId)return;
+  const tile=document.elementFromPoint(event.clientX,event.clientY)?.closest('#board [data-index]');
+  if(tile&&Number(tile.dataset.index)!==state.path.at(-1)){const previous=state.path.join(',');pickTile(Number(tile.dataset.index));if(previous!==state.path.join(','))state.moved=true;}
+});
+$('#board').addEventListener('pointerup',event=>{if(event.pointerId!==state.pointerId)return;state.drag=false;state.pointerId=null;if($('#board').hasPointerCapture(event.pointerId))$('#board').releasePointerCapture(event.pointerId);finishPath(state.moved);});
+$('#board').addEventListener('pointercancel',()=>{state.drag=false;state.pointerId=null;clearPath();});
+$('#board').addEventListener('lostpointercapture',()=>{state.drag=false;state.pointerId=null;});
+$('#board').addEventListener('click',event=>{if(event.detail!==0)return;const tile=event.target.closest('[data-index]');if(!tile)return;if(state.phase==='ready'||state.phase==='ended')startRun();pickTile(Number(tile.dataset.index));finishPath();});
+$('#board').addEventListener('keydown',event=>{
+  const index=Number(event.target.closest('[data-index]')?.dataset.index);if(!Number.isInteger(index))return;const row=Math.floor(index/GRID_SIZE),col=index%GRID_SIZE;
+  const next={ArrowLeft:row*GRID_SIZE+Math.max(0,col-1),ArrowRight:row*GRID_SIZE+Math.min(GRID_SIZE-1,col+1),ArrowUp:Math.max(0,row-1)*GRID_SIZE+col,ArrowDown:Math.min(GRID_SIZE-1,row+1)*GRID_SIZE+col}[event.key];
+  if(next!==undefined){event.preventDefault();state.focusIndex=next;document.querySelectorAll('.tile').forEach(el=>el.tabIndex=Number(el.dataset.index)===next?0:-1);$(`[data-index="${next}"]`).focus();}
+  if(event.key==='Backspace'){event.preventDefault();state.path.pop();renderPath();}
+});
+$('#targets').addEventListener('click',event=>{const button=event.target.closest('[data-target]');if(!button||state.locked||state.phase==='paused')return;state.targetIndex=Number(button.dataset.target);clearPath();renderTargets();sound.play('ui');});
+$('#startBtn').onclick=()=>state.phase==='playing'?(state.mode==='zen'?endRun():pauseGame()):startRun();$('#pauseBtn').onclick=()=>pauseGame();
+$('#clearPathBtn').onclick=()=>{clearPath();sound.play('undo');};$('#bankBtn').onclick=()=>finishPath();$('#howToBtn').onclick=showHelp;
+$('.brand').onclick=event=>{event.preventDefault();if(state.phase==='playing')pauseGame();};
+document.querySelectorAll('[data-mode]').forEach(el=>el.onclick=()=>{if(state.mode===el.dataset.mode)return;if(state.phase==='playing')pauseGame(`mode:${el.dataset.mode}`);else setMode(el.dataset.mode);});
+$('#hintBtn').onclick=()=>{
+  if(state.phase==='ready')startRun();if(!active()||!state.hints)return;
+  state.hints--;state.combo=1;state.comboUntil=0;state.path=[];state.hint=[...state.targets[state.targetIndex].path];sound.play('hint');renderPath();updateUI();toast('Follow the numbered tiles. You’ve got this.');
+  clearTimeout(hintTimeout);hintTimeout=setTimeout(()=>{state.hint=[];renderPath();},4000);
+};
+$('#shuffleBtn').onclick=()=>{
+  if(state.phase==='ready')startRun();if(!active()||!state.shuffles)return;
+  state.shuffles--;state.combo=1;state.comboUntil=0;state.path=[];state.hint=[];state.board=shuffleBoard(state.board,state.rng);state.targets=findTargets(state.board,state.rng);state.targetIndex=0;
+  renderBoard(new Set(state.board.map(t=>t.id)));renderTargets();updateUI();sound.play('shuffle');toast('Fresh perspective. Same possibilities.');
+};
+$('#soundBtn').onclick=()=>{state.muted=!state.muted;storage.set('muted',state.muted);sound.setEnabled(!state.muted);sound.unlock();if(!state.muted&&state.phase==='playing')sound.start(state.mode);updateUI();};
+$('#musicBtn').onclick=()=>{state.music=!state.music;storage.set('music',state.music);sound.unlock();sound.setMusicEnabled(state.music);if(state.phase==='playing')sound.start(state.mode);updateUI();};
+$('#gameDialog').addEventListener('cancel',event=>{event.preventDefault();closeDialog();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('#gameDialog').open){if(state.path.length)clearPath();else if(state.phase==='playing')pauseGame();}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.phase==='playing')pauseGame();});window.addEventListener('resize',()=>renderPath());
+function tick(now) {
+  if(state.phase==='playing'){
+    const delta=Math.min(2,(now-state.lastTick)/1000),previous=Math.ceil(state.time);if(state.mode!=='zen')state.time=Math.max(0,state.time-delta);
+    if(state.combo>1&&now>state.comboUntil){state.combo=1;sound.setIntensity(isSurge()?1:.15);updateUI();}
+    if(previous!==Math.ceil(state.time)||isSurge())updateUI();
+    if(state.surgeUntil&&now>=state.surgeUntil){state.surgeUntil=0;sound.setIntensity(.15);updateUI();}
+    if(state.mode!=='zen'&&state.time<=10&&previous!==Math.ceil(state.time)&&state.time>0)sound.play('countdown');if(state.mode!=='zen'&&state.time<=0)endRun();
+  }
+  state.lastTick=now;requestAnimationFrame(tick);
+}
+sound.setEnabled(!state.muted);sound.setMusicEnabled(state.music);prepareBoard();renderRecords();requestAnimationFrame(tick);
+if('serviceWorker' in navigator&&import.meta.env.PROD)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));

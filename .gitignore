@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .vite/
+.npm-cache/
 .env
 .DS_Store
 scores.json

@@ -1,12 +1,12 @@
 {
-  "name": "MathsGrid",
-  "short_name": "MathsGrid",
-  "description": "A premium arithmetic puzzle game where you chain numbers and operators to hit the target.",
+  "name": "Sum Surge by MathsGrid",
+  "short_name": "Sum Surge",
+  "description": "Connect numbers, make a target, and find your flow. Rush, Zen, and Daily number puzzles.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#07111f",
-  "theme_color": "#0b1020",
+  "background_color": "#0b1515",
+  "theme_color": "#0b1515",
   "orientation": "portrait",
   "icons": [
     {
